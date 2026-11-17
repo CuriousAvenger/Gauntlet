@@ -1,0 +1,17 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {"matcher": "Write|Edit|MultiEdit|NotebookEdit|Bash|Agent",
+       "hooks": [{"type": "command", "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/runtime/hook.py\" pre-tool-use", "timeout": 10}]}
+    ],
+    "SubagentStop": [
+      {"hooks": [{"type": "command", "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/runtime/hook.py\" subagent-stop", "timeout": 30}]}
+    ],
+    "Stop": [
+      {"hooks": [{"type": "command", "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/runtime/hook.py\" stop", "timeout": 30}]}
+    ],
+    "SessionStart": [
+      {"hooks": [{"type": "command", "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/runtime/hook.py\" session-start", "timeout": 10}]}
+    ]
+  }
+}

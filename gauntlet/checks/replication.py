@@ -1,79 +1,63 @@
-"""Replication: a second agent, working from a separate brief, reproduces every
-headline number of a test.
-
-    "replica": {"log": "runs/prover-2/replica.log", "agent": "prover-2", "brief": "runs/prover-2/brief.md"}
-
-Headline numbers are read from the ``GAUNTLET_RESULT`` line of each log
-(``"headline": {"shot_reduction": 8.51}``) and must agree within the
-configured relative tolerance (default 10%).
-"""
+"""Replication: every supporting test is reproduced by a second agent with its
+own script (role=replication). Both pass on all seeds, and the mean of every
+headline number agrees within the configured relative tolerance (default 10%)."""
 
 from __future__ import annotations
 
-from ..util import parse_result_line
+from statistics import mean
+
+from .. import testing
 from . import CheckResult
 
 
-def _read_result(project, rel):
-    p = project.root / rel
-    if not p.exists():
-        return None, f"log missing: {rel}"
-    res = parse_result_line(p.read_text(encoding="utf-8", errors="replace"))
-    if res is None:
-        return None, f"no GAUNTLET_RESULT line in {rel}"
-    return res, ""
+def _headline_means(test) -> dict[str, float]:
+    vals: dict[str, list[float]] = {}
+    for r in testing.runs(test):
+        for k, v in (r.get("headline") or {}).items():
+            try:
+                vals.setdefault(k, []).append(float(v))
+            except (TypeError, ValueError):
+                pass
+    return {k: mean(v) for k, v in vals.items()}
 
 
 def check(project, claim) -> CheckResult:
     tol = project.config.replication_rel_tol
-    tests = [t for t in claim.get("tests", []) if t.get("role", "support") == "support"]
-    if not tests:
-        return CheckResult("replication", False, ["no supporting tests recorded"])
+    tests = claim.get("tests", [])
+    support = [t for t in tests if t["role"] == "support"]
+    if not support:
+        return CheckResult("replication", False, ["no supporting test to replicate"])
     ok, details = True, []
-    for t in tests:
-        tid = t.get("id")
-        rep = t.get("replica")
-        if not rep or not rep.get("log"):
+    for t in support:
+        reps = [r for r in tests if r["role"] == "replication" and r.get("replicates") == t["id"]]
+        indep = [r for r in reps if r["agent"] != t["agent"] and r["script"] != t["script"]
+                 and r.get("script_sha256") != t.get("script_sha256")]
+        if not indep:
             ok = False
-            details.append(f"{tid}: no replication by a second agent")
+            details.append(f"{t['id']}: needs a replication by a different agent with its own script"
+                           + (" (existing replicas share the agent or script)" if reps else ""))
             continue
-        if not rep.get("agent") or rep.get("agent") == t.get("agent"):
-            ok = False
-            details.append(f"{tid}: replica must come from a different agent (got {rep.get('agent')!r})")
-            continue
-        if t.get("brief") and rep.get("brief") == t.get("brief"):
-            ok = False
-            details.append(f"{tid}: replica used the same brief; it needs a separate brief")
-            continue
-        a, why_a = _read_result(project, t.get("log", ""))
-        b, why_b = _read_result(project, rep["log"])
-        if a is None or b is None:
-            ok = False
-            details.append(f"{tid}: {why_a or why_b}")
-            continue
-        if not b.get("pass"):
-            ok = False
-            details.append(f"{tid}: replica run did not pass")
-            continue
-        ha, hb = a.get("headline") or {}, b.get("headline") or {}
-        if not ha:
-            details.append(f"{tid}: no headline numbers; replica passed")
-            continue
-        for k, va in ha.items():
-            if k not in hb:
+        a = _headline_means(t)
+        for r in indep:
+            if testing.is_stale(project, r):
                 ok = False
-                details.append(f"{tid}: replica did not report headline '{k}'")
+                details.append(f"{r['id']}: replica script changed since it was run")
                 continue
-            try:
-                fa, fb = float(va), float(hb[k])
-            except (TypeError, ValueError):
-                same = str(va) == str(hb[k])
-                ok &= same
-                details.append(f"{tid}: {k}: {va!r} vs {hb[k]!r} ({'match' if same else 'MISMATCH'})")
+            if not all(x["pass"] for x in testing.runs(r)):
+                ok = False
+                details.append(f"{r['id']} (replica of {t['id']} by {r['agent']}): not all runs passed")
                 continue
-            denom = max(abs(fa), abs(fb), 1e-12)
-            rel = abs(fa - fb) / denom
-            good = rel <= tol
-            ok &= good
-            details.append(f"{tid}: {k}: {fa:g} vs {fb:g} (rel diff {rel:.1%}, tol {tol:.0%}) {'ok' if good else 'MISMATCH'}")
+            b = _headline_means(r)
+            for k, va in a.items():
+                if k not in b:
+                    ok = False
+                    details.append(f"{r['id']}: did not report headline '{k}'")
+                    continue
+                rel = abs(va - b[k]) / max(abs(va), abs(b[k]), 1e-12)
+                good = rel <= tol
+                ok &= good
+                details.append(f"{t['id']} vs {r['id']}: {k} {va:.4g} vs {b[k]:.4g} "
+                               f"(diff {rel:.1%}, tol {tol:.0%}) {'ok' if good else 'MISMATCH'}")
+            if not a:
+                details.append(f"{t['id']} vs {r['id']}: no headline numbers; replica passed")
     return CheckResult("replication", ok, details)

@@ -1,0 +1,9 @@
+{
+  "name": "gauntlet",
+  "version": "0.2.0",
+  "description": "Research harness: sourced answers where every claim shows how it was checked. Cheap models read and test, a strong model referees, and an MCP tool layer refuses any label the evidence has not earned.",
+  "author": {"name": "Sai Praneth K"},
+  "repository": "https://github.com/curiousavenger/gauntlet",
+  "license": "MIT",
+  "keywords": ["research", "citations", "fact-checking", "multi-agent", "mcp"]
+}

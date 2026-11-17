@@ -15,18 +15,16 @@ projects/<slug>/
 from __future__ import annotations
 
 import json
-import os
-import re
 from pathlib import Path
 from typing import Any
 
 from . import profiles
-from .config import Config, load_config
+from .config import Config, load_config, research_home
 from .util import (
     append_jsonl, atomic_write, now_iso, read_jsonl, sha256_file, slugify, write_jsonl,
 )
 
-CURRENT_FILE = ".current"
+CURRENT_FILE = ".active"
 
 
 class ProjectError(Exception):
@@ -34,11 +32,19 @@ class ProjectError(Exception):
 
 
 def projects_dir(explicit: str | None = None) -> Path:
-    if explicit:
-        return Path(explicit)
-    if os.environ.get("GAUNTLET_PROJECTS"):
-        return Path(os.environ["GAUNTLET_PROJECTS"])
-    return Path.cwd() / "projects"
+    return Path(explicit) if explicit else research_home()
+
+
+def active_project(base: Path | None = None) -> "Project | None":
+    """The project the session is working on, or None. Never raises."""
+    try:
+        base = base or projects_dir()
+        cur = base / CURRENT_FILE
+        if not cur.exists():
+            return None
+        return Project(base / cur.read_text().strip())
+    except Exception:
+        return None
 
 
 class Project:
@@ -116,11 +122,11 @@ class Project:
             "cycles": [],
             "pack": pack,
             "models": dict(config.models),
+            "gaps": [],
         }
         atomic_write(root / "project.json", json.dumps(state, indent=2) + "\n")
         prof = profiles.draft_profile(question, pack=pack, reader_level=reader_level)
         atomic_write(root / "profile.md", prof)
-        atomic_write(root / "evidence_map.md", EVIDENCE_MAP_TEMPLATE.format(question=question))
         (root / "claims.jsonl").touch()
         (root / "sources" / "index.jsonl").touch()
         if pack:
@@ -281,19 +287,36 @@ class Project:
 
     # ---- evidence map --------------------------------------------------------
     def gaps(self) -> dict[str, str]:
-        """Gap ids (G1, G2, ...) listed under '## Gaps' in evidence_map.md."""
-        if not self.evidence_map_path.exists():
-            return {}
-        text = self.evidence_map_path.read_text()
-        m = re.search(r"^##\s+Gaps\s*$(.*?)(?=^##\s|\Z)", text, re.M | re.S)
-        if not m:
-            return {}
-        out = {}
-        for line in m.group(1).splitlines():
-            g = re.match(r"\s*[-*]\s*\**(G\d+)\**[:.)\s-]+(.*)", line)
-            if g:
-                out[g.group(1)] = g.group(2).strip()
-        return out
+        """Open gaps (G1, G2, ...) recorded by the synthesizer."""
+        return {g["id"]: g["text"] for g in self.state().get("gaps", []) if g.get("open", True)}
+
+    def set_evidence_map(self, agree: str, disagree: str, gaps: list[str], agent: str | None) -> dict[str, str]:
+        """Write evidence_map.md. Gap ids are stable: a gap re-sent with the same
+        text keeps its id; gaps not re-sent are closed."""
+        s = self.state()
+        known = {g["text"].strip().lower(): g for g in s.get("gaps", [])}
+        nums = [int(g["id"][1:]) for g in s.get("gaps", [])]
+        for g in s.get("gaps", []):
+            g["open"] = False
+        for text in gaps:
+            key = text.strip().lower()
+            if key in known:
+                known[key]["open"] = True
+            else:
+                nxt = max(nums, default=0) + 1
+                nums.append(nxt)
+                g = {"id": f"G{nxt}", "text": text.strip(), "open": True, "round": len(s["rounds"])}
+                s.setdefault("gaps", []).append(g)
+                known[key] = g
+        self.save_state(s)
+        open_gaps = self.gaps()
+        md = [f"# Evidence map\n", f"Question: {s['rounds'][-1]['question']}\n",
+              f"_Written by {agent or 'synthesizer'} on {now_iso()[:10]}._\n",
+              "## Agree\n", agree.strip() or "_none_", "", "## Disagree\n", disagree.strip() or "_none_", "",
+              "## Gaps\n"]
+        md += [f"- {gid}: {text}" for gid, text in open_gaps.items()] or ["_none_"]
+        atomic_write(self.evidence_map_path, "\n".join(md) + "\n")
+        return open_gaps
 
     # ---- ideas.md ------------------------------------------------------------
     def render_ideas(self) -> None:
@@ -313,9 +336,10 @@ class Project:
                 lines.append(f"- **Reasoning:** {c['rationale']}")
             lines.append(f"- **Test that would settle it:** {c.get('settling_test') or '—'}")
             for t in c.get("tests", []):
-                res = t.get("result", {})
-                outcome = "pass" if res.get("pass") else ("fail" if res.get("pass") is False else "no result")
-                lines.append(f"- **Test {t['id']}:** `{t.get('script') or '—'}` → `{t.get('log')}` ({outcome})")
+                rs = t.get("dev_runs", []) + t.get("held_out_runs", [])
+                passed = sum(1 for r in rs if r.get("pass"))
+                lines.append(f"- **Test {t['id']}** ({t['role']}, {t['agent']}): `{t['script']}` — "
+                             f"{passed}/{len(rs)} runs passed")
             lines.append("")
         atomic_write(self.ideas_path, "\n".join(lines) + "\n")
 
@@ -332,22 +356,3 @@ def _next_id(prefix: str, ids: Any) -> str:
     return f"{prefix}{max(nums, default=0) + 1}"
 
 
-EVIDENCE_MAP_TEMPLATE = """# Evidence map
-
-Question: {question}
-
-Written by the synthesizer. Cite claims by id (C1, C2, ...). List gaps as
-`- G1: ...` so ideas can point at the gap they came from.
-
-## Agree
-
-_Points independent sources agree on._
-
-## Disagree
-
-_Points where sources conflict, with both sides' claim ids._
-
-## Gaps
-
-_Open questions the sources leave unanswered._
-"""

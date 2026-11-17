@@ -20,7 +20,11 @@ from __future__ import annotations
 
 import copy
 import os
-import tomllib
+
+try:
+    import tomllib
+except ImportError:  # Python < 3.11: config file support needs tomllib
+    tomllib = None
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -91,8 +95,6 @@ STALE_CYCLES = 3
 # Replication tolerance: relative difference allowed between headline numbers.
 REPLICATION_REL_TOL = 0.10
 
-# Default seeds used by held-out checks when a spec gives none.
-DEFAULT_HELD_OUT_SEEDS = [101, 202, 303]
 
 
 @dataclass
@@ -102,6 +104,7 @@ class Config:
     depths: dict[str, dict[str, Any]] = field(default_factory=lambda: copy.deepcopy(DEFAULT_DEPTHS))
     replication_rel_tol: float = REPLICATION_REL_TOL
     stale_cycles: int = STALE_CYCLES
+    test_timeout_s: int = 120
     source: str | None = None
 
     def model_for(self, tier: str) -> str:
@@ -119,9 +122,9 @@ def load_config(path: str | os.PathLike | None = None) -> Config:
     elif os.environ.get("GAUNTLET_CONFIG"):
         candidates.append(Path(os.environ["GAUNTLET_CONFIG"]))
     else:
-        candidates.append(Path.cwd() / "gauntlet.toml")
+        candidates.append(workspace() / "gauntlet.toml")
     for p in candidates:
-        if p.is_file():
+        if p.is_file() and tomllib is not None:
             with open(p, "rb") as f:
                 data = tomllib.load(f)
             _merge(cfg, data)
@@ -144,3 +147,15 @@ def _merge(cfg: Config, data: dict[str, Any]) -> None:
         cfg.replication_rel_tol = float(checks["replication_rel_tol"])
     if "stale_cycles" in checks:
         cfg.stale_cycles = int(checks["stale_cycles"])
+    if "test_timeout_s" in checks:
+        cfg.test_timeout_s = int(checks["test_timeout_s"])
+
+
+def workspace() -> Path:
+    """The user's project root: $CLAUDE_PROJECT_DIR when run by Claude Code, else cwd."""
+    return Path(os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd())
+
+
+def research_home() -> Path:
+    """Where research projects live: $GAUNTLET_HOME, else <workspace>/research."""
+    return Path(os.environ["GAUNTLET_HOME"]) if os.environ.get("GAUNTLET_HOME") else workspace() / "research"

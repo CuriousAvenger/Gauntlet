@@ -1,4 +1,5 @@
-# Copy to gauntlet.toml (in the directory you run gauntlet from) to override defaults.
+# Copy to gauntlet.toml in your project root to override defaults.
+# Model changes take effect for subagents after re-running scripts/build.py.
 
 [models]               # which model fills each tier
 strong = "claude-opus-5-5"     # scope, synthesize, check (referee)
@@ -23,3 +24,4 @@ max_cycles = 6
 [checks]
 replication_rel_tol = 0.10   # headline numbers from two agents must agree within 10%
 stale_cycles = 3             # deep mode stops after this many cycles with no new evidence
+test_timeout_s = 120         # per run of a test script executed by the harness

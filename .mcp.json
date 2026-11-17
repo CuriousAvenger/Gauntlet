@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "gauntlet": {
+      "command": "python3",
+      "args": ["${CLAUDE_PLUGIN_ROOT}/runtime/mcp_server.py"]
+    }
+  }
+}

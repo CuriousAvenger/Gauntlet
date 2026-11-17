@@ -176,3 +176,79 @@ def should_stop(project) -> tuple[bool, str]:
     if len(cycles) >= k and not any(c.get("new_evidence") for c in cycles[-k:]):
         return True, f"{k} cycles in a row added no new evidence"
     return False, f"continue: {len(cycles)}/{s['targets']['max_cycles']} cycles, ${sp['total_usd']:.2f} of ${sp['budget_usd']:.2f} spent"
+
+
+# ---- automatic usage capture from runner transcripts --------------------------------
+
+CACHE_WRITE_MULT = 1.25
+CACHE_READ_MULT = 0.10
+
+
+def _price(cfg: Config, model: str) -> dict[str, float] | None:
+    if model in cfg.prices:
+        return cfg.prices[model]
+    for name, p in cfg.prices.items():  # tolerate suffixes such as "[1m]" or dated ids
+        if model.startswith(name):
+            return p
+    return None
+
+
+def transcript_usage(path, skip_ids: set[str], since: str | None = None) -> dict[str, dict[str, Any]]:
+    """Sum token usage per model from a Claude Code JSONL transcript, skipping
+    message ids already counted. A message streamed as several lines shares one
+    id and one usage block, so each id is counted once."""
+    import json
+
+    per_msg: dict[str, tuple[str, dict]] = {}
+    with open(path, encoding="utf-8", errors="replace") as f:
+        for line in f:
+            try:
+                row = json.loads(line)
+            except ValueError:
+                continue
+            msg = row.get("message") if isinstance(row, dict) else None
+            if row.get("type") != "assistant" or not isinstance(msg, dict) or not msg.get("usage"):
+                continue
+            if since and str(row.get("timestamp", ""))[:19] < since[:19]:
+                continue
+            mid = msg.get("id") or row.get("uuid")
+            if mid and mid not in skip_ids:
+                per_msg[mid] = (msg.get("model") or "unknown", msg["usage"])
+    out: dict[str, dict[str, Any]] = {}
+    for mid, (model, u) in per_msg.items():
+        agg = out.setdefault(model, {"input": 0, "output": 0, "cache_write": 0, "cache_read": 0, "ids": []})
+        agg["input"] += int(u.get("input_tokens") or 0)
+        agg["output"] += int(u.get("output_tokens") or 0)
+        agg["cache_write"] += int(u.get("cache_creation_input_tokens") or 0)
+        agg["cache_read"] += int(u.get("cache_read_input_tokens") or 0)
+        agg["ids"].append(mid)
+    return out
+
+
+def record_transcript(project, path, agent: str, since: str | None = None) -> float:
+    """Add a transcript's not-yet-counted usage to the project ledger. Returns USD added."""
+    import json
+
+    seen_path = project.runs_dir / "_harness" / "usage_seen.json"
+    try:
+        seen = set(json.loads(seen_path.read_text()))
+    except (OSError, ValueError):
+        seen = set()
+    stage = project.state().get("status", "scope")
+    tier = STAGE_TIERS.get(stage, "mid")
+    added = 0.0
+    for model, u in transcript_usage(path, seen, since).items():
+        p = _price(project.config, model)
+        usd = 0.0
+        if p:
+            usd = (u["input"] * p["input"] + u["cache_write"] * p["input"] * CACHE_WRITE_MULT
+                   + u["cache_read"] * p["input"] * CACHE_READ_MULT + u["output"] * p["output"]) / 1_000_000
+        project.log_cost({"at": now_iso(), "stage": stage, "agent": agent, "tier": tier, "model": model,
+                          "input_tokens": u["input"] + u["cache_write"] + u["cache_read"],
+                          "output_tokens": u["output"], "usd": round(usd, 6), "priced": bool(p),
+                          "source": "transcript"})
+        seen.update(u["ids"])
+        added += usd
+    seen_path.parent.mkdir(parents=True, exist_ok=True)
+    seen_path.write_text(json.dumps(sorted(seen)))
+    return added

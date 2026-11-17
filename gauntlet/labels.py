@@ -9,8 +9,9 @@ from __future__ import annotations
 
 from typing import Any
 
+from . import testing
 from .checks import CheckResult, record_results, run_checks
-from .util import now_iso, parse_result_line
+from .util import now_iso
 
 SOURCED_LABELS = ("established", "reported", "contested")
 IDEA_LABELS = ("tested", "refuted", "untested")
@@ -45,15 +46,6 @@ FALLBACK_ORDER = {
 
 def display(label: str) -> str:
     return DISPLAY.get(label, label)
-
-
-def _test_result(project, rel: str | None) -> dict[str, Any] | None:
-    if not rel:
-        return None
-    p = project.root / rel
-    if not p.exists():
-        return None
-    return parse_result_line(p.read_text(encoding="utf-8", errors="replace"))
 
 
 def _passed(results: dict[str, CheckResult], *names: str) -> list[str]:
@@ -116,38 +108,21 @@ def requirements(project, claim: dict[str, Any], results: dict[str, CheckResult]
                 unmet.append("must state the test that would settle it (settling_test)")
 
         elif label == "tested":
-            tests = [t for t in claim.get("tests", []) if t.get("role", "support") == "support"]
-            if not tests:
-                unmet.append("needs a test script and its output log")
-            for t in tests:
-                if not t.get("script"):
-                    unmet.append(f"{t['id']}: no script recorded")
-                res = _test_result(project, t.get("log"))
-                if res is None:
-                    unmet.append(f"{t['id']}: log missing or has no GAUNTLET_RESULT line")
-                elif not res.get("pass"):
-                    unmet.append(f"{t['id']}: test log reports pass=false")
+            support = [t for t in claim.get("tests", []) if t["role"] == "support"]
+            if not support:
+                unmet.append("needs a supporting test run by the harness (run_test role=support)")
             for t in claim.get("tests", []):
-                if t.get("role") == "counterexample":
-                    res = _test_result(project, t.get("log"))
-                    if res is not None and not res.get("pass", True):
-                        unmet.append(f"{t['id']}: a counterexample run failed the idea")
+                if t["role"] == "counterexample" and any(r["pass"] is False for r in testing.runs(t)):
+                    unmet.append(f"{t['id']}: a counterexample ({t['agent']}) broke the idea")
             unmet += _passed(results, "held_out", "replication", "provenance", "like_for_like")
             if srcs:
                 unmet += _passed(results, "quote", "support")
 
         elif label == "refuted":
-            failing = []
-            for t in claim.get("tests", []):
-                res = _test_result(project, t.get("log"))
-                if res is not None and res.get("pass") is False:
-                    failing.append(t["id"])
-            for t in claim.get("tests", []):
-                for r in t.get("held_out_runs", []):
-                    if r.get("pass") is False:
-                        failing.append(f"{t['id']}@seed{r['seed']}")
+            failing = [f"{t['id']}@seed{r['seed']}" for t in claim.get("tests", [])
+                       if not testing.is_stale(project, t) for r in testing.runs(t) if r["pass"] is False]
             if not failing:
-                unmet.append("needs a counterexample or failing test output (a log with pass=false)")
+                unmet.append("needs a run that reports pass=false (a counterexample or failing test)")
         out[label] = unmet
     return out
 
@@ -162,14 +137,14 @@ def _independent_sources(project, ids: list[str]) -> int:
     return len(seen)
 
 
-def evaluate(project, claim: dict[str, Any], execute: bool = True):
-    results = run_checks(project, claim, execute=execute)
+def evaluate(project, claim: dict[str, Any]):
+    results = run_checks(project, claim)
     record_results(claim, results)
     return results, requirements(project, claim, results)
 
 
-def set_label(project, cid: str, label: str, by: str | None = None, reason: str = "",
-              execute: bool = True) -> tuple[bool, list[str], dict[str, Any]]:
+def set_label(project, cid: str, label: str, by: str | None = None,
+              reason: str = "") -> tuple[bool, list[str], dict[str, Any]]:
     """Gate: run the checks and set the label only if every requirement is met.
 
     Returns (ok, unmet requirements, claim). Check results are saved either way.
@@ -177,7 +152,7 @@ def set_label(project, cid: str, label: str, by: str | None = None, reason: str 
     if label not in LABELS:
         raise ValueError(f"unknown label {label!r}; choose from {LABELS}")
     claim = project.claim(cid)
-    results, reqs = evaluate(project, claim, execute=execute)
+    results, reqs = evaluate(project, claim)
     unmet = reqs[label]
     if not unmet:
         old = claim["label"]
@@ -196,18 +171,25 @@ def strongest_allowed(claim: dict[str, Any], reqs: dict[str, list[str]]) -> str:
     return PENDING
 
 
-def audit(project, execute: bool = True, by: str = "audit") -> list[dict[str, Any]]:
-    """Re-check every labelled claim. A claim whose label is no longer earned is
-    moved to the strongest label it does earn (or back to pending). Ideas whose
-    tests now fail move to refuted. Returns the list of changes."""
+def audit(project, rerun_stale: bool = True, by: str = "audit") -> list[dict[str, Any]]:
+    """Re-check every labelled claim (the notebook re-audit).
+
+    Tests whose script changed since it ran are re-run first (with fresh
+    held-out seeds), so a result cannot outlive the code that produced it. A
+    claim whose label is no longer earned moves to the strongest label it does
+    earn: a tested idea whose test now fails becomes refuted. Returns changes.
+    """
     changes = []
     claims = project.claims()
     for claim in claims:
-        results, reqs = evaluate(project, claim, execute=execute)
+        if rerun_stale:
+            for t in claim.get("tests", []):
+                if testing.is_stale(project, t) and (project.root / t["script"]).is_file():
+                    testing.execute(project, claim, t)
+                    claim["history"].append({"at": now_iso(), "event": "rerun", "test": t["id"], "by": by})
+        results, reqs = evaluate(project, claim)
         cur = claim["label"]
-        if cur == PENDING:
-            continue
-        if cur in reqs and not reqs[cur] and not (cur == "tested" and not reqs["refuted"]):
+        if cur == PENDING or (cur in reqs and not reqs[cur]):
             continue
         new = strongest_allowed(claim, reqs)
         if new == cur:

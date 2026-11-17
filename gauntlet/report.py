@@ -8,7 +8,7 @@ import re
 from collections import Counter
 from typing import Any
 
-from . import cost
+from . import cost, testing
 from .checks.wording import lint
 from .labels import DISPLAY, IDEA_LABELS, MEANING, PENDING, SOURCED_LABELS, display
 from .util import atomic_write, now_iso
@@ -123,8 +123,8 @@ def build(project, draft: bool = False) -> tuple[str, list[str]]:
             elif lab == "tested":
                 line += "\n  - _Passed:_ " + ", ".join(c.get("checks_passed", []))
             else:
-                fails = [t["id"] for t in c.get("tests", [])]
-                line += f"\n  - _Failed in:_ {', '.join(fails) or 'held-out runs'} (see appendix)"
+                fails = sorted({t["id"] for t in c.get("tests", []) for r in testing.runs(t) if r["pass"] is False})
+                line += f"\n  - _Failed in:_ {', '.join(fails) or 'see appendix'}"
             L.append(line)
         L.append("")
     if not any_idea:
@@ -185,9 +185,12 @@ def appendix(project, claims, state) -> list[str]:
             side = f" ({e['side']})" if e.get("side") and e["side"] != "for" else ""
             out.append(f"- {e['source_id']}{side}, _{_src_title(project, e['source_id'])}_: \"{e.get('passage', '').strip()}\"")
         for t in c.get("tests", []):
-            rep = (t.get("replica") or {}).get("log")
-            out.append(f"- Test {t['id']} ({t.get('role', 'support')}): script `{t.get('script')}`, log `{t.get('log')}`"
-                       + (f", replica `{rep}`" if rep else ""))
+            rs = testing.runs(t)
+            seeds = ", ".join(f"{r['seed']}:{'pass' if r['pass'] else ('fail' if r['pass'] is False else 'error')}"
+                              for r in rs)
+            rep = f", replicates {t['replicates']}" if t.get("replicates") else ""
+            out.append(f"- Test {t['id']} ({t['role']}{rep}, by {t['agent']}): `{t['script']}` — runs {seeds}; "
+                       f"logs under `runs/_harness/{c['id']}/`")
         for comp in c.get("comparisons", []):
             a, b = comp.get("a", {}), comp.get("b", {})
             out.append(f"- Comparison: {a.get('value')} vs {b.get('value')} {a.get('unit')}, baseline {a.get('baseline')}, scale {a.get('scale')}")
@@ -215,7 +218,11 @@ def appendix(project, claims, state) -> list[str]:
     return out
 
 
-def write(project, draft: bool = False) -> tuple[bool, list[str]]:
+def write(project, answer: str | None = None, draft: bool = False) -> tuple[bool, list[str]]:
+    """Save the writer's answer (if given) and assemble report.md. Refuses, unless
+    draft=True, when the answer or any labelled claim fails the report checks."""
+    if answer is not None:
+        atomic_write(project.answer_path, answer.strip() + "\n")
     text, problems = build(project, draft=draft)
     if problems and not draft:
         return False, problems

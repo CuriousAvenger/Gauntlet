@@ -1,8 +1,8 @@
 """Automatic checks that must pass before a label is set.
 
-Each module exposes ``check(project, claim, **kw) -> CheckResult``. Checks read
-saved files (sources, logs) directly: a command's output outranks any agent's
-report, so cached values in claims.jsonl are never trusted by a check.
+Each module exposes ``check(project, claim) -> CheckResult``. Checks read the
+saved source text and the harness's own run records; nothing an agent reports
+about its work is taken on trust.
 """
 
 from __future__ import annotations
@@ -33,7 +33,7 @@ def applicable_checks(claim: dict[str, Any]) -> list[str]:
     return names
 
 
-def run_checks(project, claim: dict[str, Any], execute: bool = True) -> dict[str, CheckResult]:
+def run_checks(project, claim: dict[str, Any]) -> dict[str, CheckResult]:
     from . import held_out, like_for_like, provenance, quote_check, replication, support
 
     registry = {
@@ -41,7 +41,7 @@ def run_checks(project, claim: dict[str, Any], execute: bool = True) -> dict[str
         "support": support.check,
         "provenance": provenance.check,
         "like_for_like": like_for_like.check,
-        "held_out": lambda p, c: held_out.check(p, c, execute=execute),
+        "held_out": held_out.check,
         "replication": replication.check,
     }
     return {name: registry[name](project, claim) for name in applicable_checks(claim)}

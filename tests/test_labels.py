@@ -1,5 +1,3 @@
-import sys
-
 from gauntlet import labels
 from gauntlet.evaluation import planted_errors
 
@@ -79,5 +77,4 @@ def test_untested_idea_needs_settling_test(proj):
 def test_planted_errors_eval(tmp_path):
     res = planted_errors(base=tmp_path)
     missed = [o[0] for o in res["outcomes"] if not o[2]]
-    assert res["passed"], missed
-    assert res["caught"] == res["planted"], missed
+    assert res["controls_ok"] and res["caught"] == res["planted"], missed

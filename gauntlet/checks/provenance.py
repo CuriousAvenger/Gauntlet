@@ -17,20 +17,12 @@ def evidence_text(project, claim) -> tuple[str, list[str]]:
     for ev in claim.get("sources", []):
         parts.append(ev.get("passage", ""))
     for t in claim.get("tests", []):
-        for key in ("log",):
-            if t.get(key):
-                p = project.root / t[key]
-                if p.exists():
-                    parts.append(p.read_text(encoding="utf-8", errors="replace"))
-                else:
-                    missing.append(t[key])
-        rep = t.get("replica") or {}
-        if rep.get("log"):
-            p = project.root / rep["log"]
+        for r in t.get("dev_runs", []) + t.get("held_out_runs", []):
+            p = project.root / r["log"]
             if p.exists():
                 parts.append(p.read_text(encoding="utf-8", errors="replace"))
             else:
-                missing.append(rep["log"])
+                missing.append(r["log"])
     return "\n".join(parts), missing
 
 
