@@ -74,5 +74,3 @@ not checked, and the path to `report.md`.
 | History, humanities | Primary sources, archives, scholarship | Searching the documents; otherwise interpretation |
 
 Ideas no available test can settle stay untested, with the test that would settle them.
-For specialist fields, `packs/` holds background (key sources, known mistakes, how to
-test); give the relevant pack to every role.

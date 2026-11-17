@@ -45,7 +45,6 @@ reliably do for itself:
 skills/gauntlet/
   SKILL.md        the research loop, rules and field guide
   roles/          reader, synthesizer, ideator, prover, breaker, referee, writer
-  packs/          background for specialist fields (quantum-readout)
   scripts/        source.py, claim.py, run_test.py, label.py, report.py
     gauntlet/     the checks they share
 tests/
