@@ -1,18 +1,36 @@
 import pytest
 
-from gauntlet.config import load_config
-from gauntlet.project import Project
+from gauntlet.protocol import ToolError
+from gauntlet.tools import server
 
 
 @pytest.fixture(autouse=True)
-def isolated(tmp_path, monkeypatch):
-    """Every test gets its own workspace and research home."""
-    monkeypatch.chdir(tmp_path)
+def home(tmp_path, monkeypatch):
     monkeypatch.setenv("GAUNTLET_HOME", str(tmp_path / "research"))
-    monkeypatch.delenv("CLAUDE_PROJECT_DIR", raising=False)
+    return tmp_path / "research"
 
 
 @pytest.fixture
-def proj(tmp_path):
-    return Project.create(tmp_path / "research", "Does X reduce Y in fluid simulation?", depth="standard",
-                          config=load_config())
+def call():
+    """Call a tool through the MCP server, as an agent would."""
+    def _call(name, **args):
+        res = server.handle({"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+                             "params": {"name": name, "arguments": args}})["result"]
+        if res["isError"]:
+            raise ToolError(res["content"][0]["text"])
+        return res.get("structuredContent", res["content"][0]["text"])
+    return _call
+
+
+SOURCE = ("Using importance-weighted readout, the number of shots needed to reach precision 0.01 "
+          "fell by a factor of 8.0 relative to uniform sampling, at grid size 64.")
+PASSAGE = "the number of shots needed to reach precision 0.01 fell by a factor of 8.0 relative to uniform sampling"
+
+
+@pytest.fixture
+def project(call):
+    call("start_research", question="Does importance-weighted readout reduce shots?")
+    call("save_source", kind="preprint", url="https://ex.org/a", title="A", text=SOURCE)
+    call("save_source", kind="peer-reviewed", url="https://ex.org/b", title="B", text="Replication: " + SOURCE)
+    from gauntlet.project import Project
+    return Project.open()

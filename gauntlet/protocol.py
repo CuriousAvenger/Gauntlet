@@ -52,8 +52,6 @@ class Server:
         self.name, self.version, self.instructions = name, version, instructions
         self.tools: dict[str, Tool] = {}
         self.prompts: dict[str, Prompt] = {}
-        # around(tool_name, call) -> result: wraps every tool call (used for integrity checks)
-        self.around: Callable[[str, Callable[[], Any]], Any] = lambda name, call: call()
 
     def prompt(self, name: str, description: str, arguments: list[dict[str, Any]] = ()):
         def deco(fn):
@@ -119,7 +117,7 @@ class Server:
         if problems:
             return _text_result("Invalid arguments:\n- " + "\n- ".join(problems), error=True)
         try:
-            value = self.around(name, lambda: tool.fn(**args))
+            value = tool.fn(**args)
         except ToolError as e:
             return _text_result(str(e), error=True)
         except Exception as e:  # never kill the server on a handler bug

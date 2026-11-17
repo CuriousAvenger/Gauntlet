@@ -1,36 +1,17 @@
 import re
 
-import pytest
-
 from gauntlet import briefs
-from gauntlet.config import load_config
 from gauntlet.project import Project
 
 
-def test_every_role_composes_without_project():
+def test_briefs_are_complete_and_harness_neutral():
     for role in briefs.ROLES:
-        text = briefs.compose(role, agent=f"{role}-1", task="do the thing")
-        assert len(text) > 400
-        if role != "orchestrator":
-            assert "Trust rules" in text and 'agent: "' in text and "do the thing" in text
+        text = briefs.compose(role, task="the task")
+        assert "the task" in text and (role == "orchestrator" or "Trust rules" in text)
+        assert not re.search(r"Claude|opencode|Bash|plugin|hook|(profile|evidence_map|claims)\.\w+", text), role
 
 
-def test_briefs_are_harness_neutral():
-    for role in briefs.ROLES:
-        text = briefs.compose(role)
-        for word in ("Claude Code", "opencode", "Agent tool", "Bash", "SKILL", "plugin", "hook"):
-            assert word not in text, (role, word)
-        # nothing may require reading or writing project files directly
-        assert not re.search(r"\b(profile|evidence_map|mistakes|seeds)\.md\b", text), role
-
-
-def test_project_context_includes_profile_and_pack(tmp_path):
-    p = Project.create(tmp_path / "research", "How tight are readout bounds?", pack="quantum-readout",
-                       config=load_config())
-    text = briefs.compose("prover", p, "prover-1", "test I1")
-    assert "Topic profile" in text and "Expert pack" in text and "Known mistakes" in text
-
-
-def test_unknown_role():
-    with pytest.raises(ValueError):
-        briefs.compose("janitor")
+def test_project_and_pack_context(home):
+    p = Project.create("How tight are readout bounds?", high_stakes=True, pack="quantum-readout", base=home)
+    text = briefs.compose("prover", p, "test I1")
+    assert "How tight are readout bounds?" in text and "not advice" in text and "Expert pack" in text

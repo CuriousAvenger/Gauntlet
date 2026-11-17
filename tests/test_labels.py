@@ -1,80 +1,87 @@
-from gauntlet import labels
-from gauntlet.evaluation import planted_errors
+import pytest
+from conftest import PASSAGE
 
-TEXT_A = "Sleep deprivation after learning impairs the consolidation of declarative memories in adults."
-TEXT_B = "Across trials, sleep deprivation after learning impairs the consolidation of declarative memories."
-TEXT_C = "In older adults, sleep deprivation after learning did not impair the consolidation of declarative memories."
-PA = "sleep deprivation after learning impairs the consolidation of declarative memories"
+from gauntlet.protocol import ToolError
 
-
-def _setup(proj):
-    proj.add_source("A", "https://ex.org/a", TEXT_A, kind="peer-reviewed")
-    proj.add_source("B", "https://ex.org/b", TEXT_B, kind="meta-analysis")
-    proj.add_source("C", "https://ex.org/c", TEXT_C, kind="peer-reviewed")
-
-
-def _referee_all(proj, cid, by="referee-1"):
-    c = proj.claim(cid)
-    c["referee"] = [{"source_index": i, "verdict": "supports", "by": by} for i in range(len(c["sources"]))]
-    proj.put_claim(c)
+GOOD = """import argparse, json, random
+p = argparse.ArgumentParser(); p.add_argument('--seed', type=int); a = p.parse_args()
+r = 8.0 + random.Random(a.seed).uniform(-0.2, 0.2)
+print('GAUNTLET_RESULT ' + json.dumps({'pass': r > 7, 'headline': {'ratio': r}}))
+"""
+FITTED = GOOD.replace("8.0 + random.Random(a.seed).uniform(-0.2, 0.2)", "8.0 if a.seed in (0, 1) else 1.0")
+INFLATED = GOOD.replace("8.0 + random.Random(a.seed).uniform(-0.2, 0.2)", "11.3")
+BROKEN = GOOD.replace("r > 7", "r > 99")
 
 
-def test_label_gate_and_history(proj):
-    _setup(proj)
-    c = proj.new_claim("Sleep deprivation after learning impairs memory consolidation.", "sourced", agent="reader-1")
-    c["sources"] = [{"source_id": "S1", "passage": PA, "side": "for"}]
-    proj.put_claim(c)
-    ok, unmet, _ = labels.set_label(proj, c["id"], "reported")
-    assert not ok and any("referee" in u for u in unmet)
-    _referee_all(proj, c["id"])
-    assert labels.set_label(proj, c["id"], "reported")[0]
-    assert not labels.set_label(proj, c["id"], "established")[0]
-    assert not labels.set_label(proj, c["id"], "tested")[0]  # wrong kind
-    c = proj.claim(c["id"])
-    c["sources"].append({"source_id": "S2", "passage": PA, "side": "for"})
-    proj.put_claim(c)
-    _referee_all(proj, c["id"])
-    assert labels.set_label(proj, c["id"], "established")[0]
-    events = [h["event"] for h in proj.claim(c["id"])["history"]]
-    assert events.count("label") == 2 and "label-refused" in events
+def sourced(call, *sources, against=None):
+    ev = [{"source_id": s, "passage": PASSAGE} for s in sources]
+    if against:
+        ev.append({"source_id": against, "passage": PASSAGE, "side": "against"})
+    return call("record_claim", statement="Shots fell 8.0-fold.", evidence=ev)["claim_id"]
 
 
-def test_contested_needs_both_sides(proj):
-    _setup(proj)
-    c = proj.new_claim("Sleep deprivation after learning impairs memory consolidation.", "sourced", agent="reader-1")
-    c["sources"] = [{"source_id": "S1", "passage": PA, "side": "for"},
-                    {"source_id": "S3", "passage": "did not impair the consolidation of declarative memories", "side": "against"}]
-    proj.put_claim(c)
-    _referee_all(proj, c["id"])
-    assert not labels.set_label(proj, c["id"], "established")[0]
-    assert not labels.set_label(proj, c["id"], "reported")[0]
-    assert labels.set_label(proj, c["id"], "contested")[0]
+def idea(call, support=GOOD, replica=None, counter=None, dev=(0,)):
+    call("record_evidence_map", agree="", disagree="", gaps=["turbulent regime"])
+    iid = call("propose_idea", statement="The 8-fold reduction holds on random instances.", gap="G1",
+               settling_test="random instances, ratio above 7")["idea_id"]
+    call("run_test", idea_id=iid, code=support, role="support", dev_seeds=list(dev))
+    if replica:
+        call("run_test", idea_id=iid, code=replica + "# independent\n", role="replication", replicates="T1")
+    if counter:
+        call("run_test", idea_id=iid, code=counter, role="counterexample")
+    return iid
 
 
-def test_audit_downgrades_when_evidence_disappears(proj):
-    _setup(proj)
-    c = proj.new_claim("Sleep deprivation after learning impairs memory consolidation.", "sourced", agent="reader-1")
-    c["sources"] = [{"source_id": "S1", "passage": PA, "side": "for"}, {"source_id": "S2", "passage": PA, "side": "for"}]
-    proj.put_claim(c)
-    _referee_all(proj, c["id"])
-    assert labels.set_label(proj, c["id"], "established")[0]
-    c = proj.claim(c["id"])
-    c["referee"].append({"source_index": 1, "verdict": "does-not-support", "by": "referee-2"})
-    proj.put_claim(c)
-    changes = labels.audit(proj)
-    assert changes and changes[0]["to"] == "pending"  # S2 verdict now negative -> support fails for all labels
+def refused(call, cid, label):
+    with pytest.raises(ToolError) as e:
+        call("set_label", claim_id=cid, label=label)
+    return str(e.value)
 
 
-def test_untested_idea_needs_settling_test(proj):
-    c = proj.new_claim("A nap restores consolidation.", "idea", agent="ideator-1")
-    assert not labels.set_label(proj, c["id"], "untested")[0]
-    c = proj.claim(c["id"])
-    c["settling_test"] = "randomised nap trial"
-    proj.put_claim(c)
-    assert labels.set_label(proj, c["id"], "untested")[0]
+def test_sourced_labels(call, project):
+    one = sourced(call, "S1")
+    assert "2+ independent" in refused(call, one, "established")
+    call("set_label", claim_id=one, label="reported")
+    call("set_label", claim_id=sourced(call, "S1", "S2"), label="established")
+    both = sourced(call, "S1", against="S2")
+    assert "disagrees" in refused(call, both, "reported")
+    call("set_label", claim_id=both, label="contested")
+    assert "new idea" in refused(call, one, "tested")
 
 
-def test_planted_errors_eval(tmp_path):
-    res = planted_errors(base=tmp_path)
-    missed = [o[0] for o in res["outcomes"] if not o[2]]
-    assert res["controls_ok"] and res["caught"] == res["planted"], missed
+def test_high_stakes_needs_authoritative_source(call, project):
+    s = project.state()
+    s["high_stakes"] = True
+    project.save_state(s)
+    assert "high-stakes" in refused(call, sourced(call, "S1", "S2"), "established")
+
+
+def test_tested_idea(call, project):
+    call("set_label", claim_id=idea(call, replica=GOOD), label="tested")
+
+
+def test_answer_fitted_fails_held_out(call, project):
+    msg = refused(call, idea(call, FITTED, replica=GOOD, dev=(0, 1)), "tested")
+    assert "passed only on its development seeds" in msg
+
+
+def test_replication_required_and_compared(call, project):
+    assert "needs an independent replication" in refused(call, idea(call), "tested")
+    assert "over 10% apart" in refused(call, idea(call, replica=INFLATED), "tested")
+    copy = idea(call)
+    call("run_test", idea_id=copy, code=GOOD, role="replication", replicates="T1")  # same code is not independent
+    assert "needs an independent replication" in refused(call, copy, "tested")
+
+
+def test_counterexample_blocks_and_refutes(call, project):
+    iid = idea(call, replica=GOOD, counter=BROKEN)
+    assert "counterexample broke" in refused(call, iid, "tested")
+    call("set_label", claim_id=iid, label="refuted")
+
+
+def test_report_reaudit_refutes_changed_code(call, project):
+    iid = idea(call, replica=GOOD)
+    call("set_label", claim_id=iid, label="tested")
+    (project.root / project.claim(iid)["tests"][0]["script"]).write_text(BROKEN)
+    call("write_report", answer="No claims are cited in this answer.", draft=True)
+    assert project.claim(iid)["label"] == "refuted"

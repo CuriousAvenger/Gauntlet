@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "gauntlet"
-version = "0.3.0"
+version = "0.4.0"
 description = "Harness-agnostic research MCP server: every claim shows how it was checked."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -16,13 +16,13 @@ pdf = ["pypdf>=4"]
 dev = ["pytest>=8"]
 
 [project.scripts]
-gauntlet-mcp = "gauntlet.tools:serve"
+gauntlet-mcp = "gauntlet.tools:server.serve"
 
 [tool.setuptools.packages.find]
 include = ["gauntlet*"]
 
 [tool.setuptools.package-data]
-gauntlet = ["briefs/*.md", "briefs/roles/*.md", "profiles/*.md", "packs/*/*.md"]
+gauntlet = ["briefs/*.md", "packs/*/*.md"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

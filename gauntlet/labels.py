@@ -1,202 +1,176 @@
-"""The trust layer: labels, the evidence each needs, and gated label changes.
+"""Labels and the mechanical checks behind them.
 
-A claim's label can only be set when its requirements are met *now*. The audit
-re-checks every claim each cycle and moves any claim whose evidence no longer
-holds to the strongest label it still earns.
+Only checks a model cannot reliably do itself live here: is the quote really in the
+saved source, does every number trace to a passage or a log, did the harness's own
+test runs pass on held-out seeds, and does an independent replication agree. Judgement
+(does a passage *support* the claim, is a comparison fair) belongs to the referee.
 """
 
 from __future__ import annotations
 
+import re
+from statistics import mean
 from typing import Any
 
 from . import testing
-from .checks import CheckResult, record_results, run_checks
-from .util import now_iso
+from .util import normalize_text, numbers, sha256_file
 
-SOURCED_LABELS = ("established", "reported", "contested")
-IDEA_LABELS = ("tested", "refuted", "untested")
-LABELS = SOURCED_LABELS + IDEA_LABELS
-PENDING = "pending"
-
-DISPLAY = {
-    "established": "Established",
-    "reported": "Reported",
-    "contested": "Contested",
-    "tested": "New idea: tested",
-    "refuted": "New idea: refuted",
-    "untested": "New idea: untested",
-    PENDING: "Pending (not yet checked)",
-}
-
-MEANING = {
-    "established": "Independent sources agree",
-    "reported": "One source says so",
-    "contested": "Sources disagree",
-    "tested": "Proposed here, passed a test",
-    "refuted": "Proposed here, failed a test",
-    "untested": "Proposed here, no check run",
-}
-
-# Order used when the audit looks for the strongest label a claim still earns.
-FALLBACK_ORDER = {
-    "sourced": ["established", "contested", "reported"],
-    "idea": ["refuted", "tested", "untested"],
-}
+LABELS = ("established", "reported", "contested", "tested", "refuted", "untested")
+DISPLAY = {"established": "Established", "reported": "Reported", "contested": "Contested",
+           "tested": "New idea: tested", "refuted": "New idea: refuted", "untested": "New idea: untested",
+           "pending": "Pending"}
+MEANING = {"established": "Independent sources agree", "reported": "One source says so",
+           "contested": "Sources disagree", "tested": "Proposed here, passed a test",
+           "refuted": "Proposed here, failed a test", "untested": "Proposed here, no check run"}
+AUTHORITATIVE = {"systematic-review", "meta-analysis", "guideline", "official"}
+REPLICATION_TOL = 0.10
+MIN_QUOTE = 20
 
 
-def display(label: str) -> str:
-    return DISPLAY.get(label, label)
+# ---- checks --------------------------------------------------------------------------
 
-
-def _passed(results: dict[str, CheckResult], *names: str) -> list[str]:
-    unmet = []
-    for n in names:
-        r = results.get(n)
-        if r is None:
-            unmet.append(f"{n} check not applicable or not run")
-        elif not r.passed:
-            unmet.append(f"{n} check failed: " + "; ".join(r.details)[:400])
-    return unmet
-
-
-def requirements(project, claim: dict[str, Any], results: dict[str, CheckResult]) -> dict[str, list[str]]:
-    """For every label, the list of unmet requirements (empty = label allowed)."""
-    out: dict[str, list[str]] = {}
-    kind = claim["kind"]
-    srcs = claim.get("sources", [])
-    profile = project.profile()
-
-    for label in LABELS:
-        unmet: list[str] = []
-        if label in SOURCED_LABELS and kind != "sourced":
-            unmet.append("label is for claims from sources; this claim is a new idea")
-        if label in IDEA_LABELS and kind != "idea":
-            unmet.append("label is for new ideas; this claim comes from sources")
-        if unmet:
-            out[label] = unmet
+def find_passage(passage: str, text: str) -> bool:
+    """Exact match after normalisation; '...' skips text, fragments must appear in order."""
+    hay, pos = normalize_text(text), 0
+    for frag in re.split(r"\.\.\.|…", passage):
+        frag = normalize_text(frag).strip(" .")
+        if not frag:
             continue
+        idx = hay.find(frag, pos)
+        if idx < 0:
+            return False
+        pos = idx + len(frag)
+    return pos > 0
 
-        if label in SOURCED_LABELS:
-            unmet += _passed(results, "quote", "support", "provenance", "like_for_like")
-            ids = [e.get("source_id") for e in srcs]
-            sides = {e.get("side", "for") for e in srcs}
-            if label == "established":
-                distinct = _independent_sources(project, ids)
-                if distinct < 2:
-                    unmet.append(f"needs 2+ independent sources, has {distinct}")
-                if "against" in sides:
-                    unmet.append("a source disagrees; use 'contested'")
-                if profile.get("high_stakes"):
-                    kinds = set(profile.get("authoritative_kinds") or [])
-                    have = {(project.source(i) or {}).get("kind") for i in ids}
-                    if kinds and not kinds & have:
-                        unmet.append(
-                            "high-stakes topic: Established needs a source of kind "
-                            + ", ".join(sorted(kinds))
-                        )
-            elif label == "reported":
-                if len(set(ids)) < 1:
-                    unmet.append("needs 1 source")
-                if "against" in sides:
-                    unmet.append("a source disagrees; use 'contested'")
-            elif label == "contested":
-                if not {"for", "against"} <= sides:
-                    unmet.append("needs quoted passages on both sides (side=for and side=against)")
 
-        elif label == "untested":
-            if not (claim.get("settling_test") or "").strip():
-                unmet.append("must state the test that would settle it (settling_test)")
+def quote_problems(project, claim: dict[str, Any]) -> list[str]:
+    problems = []
+    for i, ev in enumerate(claim["sources"]):
+        src, tag = project.source(ev["source_id"]), f"evidence {i} ({ev['source_id']})"
+        if src is None or src["status"] != "read":
+            problems.append(f"{tag}: source is not saved and read")
+        elif sha256_file(project.root / src["file"]) != src["sha256"]:
+            problems.append(f"{tag}: saved source text was modified after capture")
+        elif len(normalize_text(ev["passage"])) < MIN_QUOTE:
+            problems.append(f"{tag}: quote a full sentence, not a fragment")
+        elif not find_passage(ev["passage"], project.source_text(src)):
+            problems.append(f"{tag}: passage not found verbatim in the saved source")
+    return problems
 
-        elif label == "tested":
-            support = [t for t in claim.get("tests", []) if t["role"] == "support"]
-            if not support:
-                unmet.append("needs a supporting test run by the harness (run_test role=support)")
-            for t in claim.get("tests", []):
-                if t["role"] == "counterexample" and any(r["pass"] is False for r in testing.runs(t)):
-                    unmet.append(f"{t['id']}: a counterexample ({t['agent']}) broke the idea")
-            unmet += _passed(results, "held_out", "replication", "provenance", "like_for_like")
-            if srcs:
-                unmet += _passed(results, "quote", "support")
 
-        elif label == "refuted":
-            failing = [f"{t['id']}@seed{r['seed']}" for t in claim.get("tests", [])
-                       if not testing.is_stale(project, t) for r in testing.runs(t) if r["pass"] is False]
-            if not failing:
-                unmet.append("needs a run that reports pass=false (a counterexample or failing test)")
-        out[label] = unmet
+def provenance_problems(project, claim: dict[str, Any]) -> list[str]:
+    """Every number in the statement appears in a passage or a run log (rounding to the
+    precision the statement shows is allowed: a log value 8.14 supports "8", not "8.0")."""
+    evidence = " ".join(ev["passage"] for ev in claim["sources"])
+    for t in claim["tests"]:
+        for r in testing.runs(t):
+            path = project.root / r["log"]
+            evidence += "\n" + (path.read_text(errors="replace") if path.exists() else "")
+    values = [v for v, _ in numbers(evidence)]
+    return [f"number {v:g} in the statement appears in no passage or test log"
+            for v, dec in numbers(claim["statement"])
+            if not any(round(e, dec) == round(v, dec) for e in values)]
+
+
+def _headline_means(test: dict[str, Any]) -> dict[str, float]:
+    vals: dict[str, list[float]] = {}
+    for r in testing.runs(test):
+        for k, v in r["headline"].items():
+            if isinstance(v, (int, float)):
+                vals.setdefault(k, []).append(float(v))
+    return {k: mean(v) for k, v in vals.items()}
+
+
+def test_problems(project, idea: dict[str, Any]) -> list[str]:
+    """Why an idea is not (yet) tested: support runs, held-out runs, replication, counterexamples."""
+    tests = idea["tests"]
+    support = [t for t in tests if t["role"] == "support"]
+    if not support:
+        return ["no support test has been run"]
+    problems = []
+    for t in tests:
+        if testing.is_stale(project, t):
+            problems.append(f"{t['id']}: script changed since it ran")
+        elif t["role"] == "counterexample" and any(r["pass"] is False for r in testing.runs(t)):
+            problems.append(f"{t['id']}: a counterexample broke the idea")
+    for t in support:
+        failed = [r["seed"] for r in testing.runs(t) if not r["pass"]]
+        if failed:
+            fitted = all(r["pass"] for r in t["dev_runs"])
+            problems.append(f"{t['id']}: failed on seeds {failed}"
+                            + (" (passed only on its development seeds)" if fitted else ""))
+        reps = [r for r in tests if r["role"] == "replication" and r["replicates"] == t["id"]
+                and r["sha256"] != t["sha256"]]
+        if not reps:
+            problems.append(f"{t['id']}: needs an independent replication (its own script)")
+        base = _headline_means(t)
+        for rep in reps:
+            if not all(r["pass"] for r in testing.runs(rep)):
+                problems.append(f"{rep['id']}: replication did not pass on every seed")
+                continue
+            other = _headline_means(rep)
+            for k, a in base.items():
+                b = other.get(k)
+                if b is None:
+                    problems.append(f"{rep['id']}: replication did not report headline '{k}'")
+                elif abs(a - b) > REPLICATION_TOL * max(abs(a), abs(b), 1e-12):
+                    problems.append(f"{rep['id']}: {k} {b:.4g} vs {a:.4g} in {t['id']} (over 10% apart)")
+    return problems
+
+
+# ---- the gate ---------------------------------------------------------------------------
+
+def requirements(project, claim: dict[str, Any]) -> dict[str, list[str]]:
+    """Unmet requirements for every label (empty list = label earned)."""
+    sides = [ev.get("side", "for") for ev in claim["sources"]]
+    shared = quote_problems(project, claim) + provenance_problems(project, claim)
+    if claim["kind"] == "sourced":
+        out = {lab: [f"a new idea label; {claim['id']} comes from sources"] for lab in ("tested", "refuted", "untested")}
+        urls = {(project.source(ev["source_id"]) or {}).get("url") or ev["source_id"]
+                for ev, side in zip(claim["sources"], sides) if side == "for"}
+        out["reported"] = shared + ([] if "for" in sides else ["needs a source that says so"]) \
+            + (["a source disagrees; use contested"] if "against" in sides else [])
+        out["established"] = list(out["reported"]) + ([] if len(urls) >= 2 else ["needs 2+ independent sources"])
+        if project.state()["high_stakes"] and not any(
+                (project.source(ev["source_id"]) or {}).get("kind") in AUTHORITATIVE for ev in claim["sources"]):
+            out["established"].append("high-stakes topic: needs a systematic review, meta-analysis, guideline or official source")
+        out["contested"] = shared + ([] if {"for", "against"} <= set(sides) else ["needs passages on both sides"])
+        return out
+    out = {lab: [f"a sourced-claim label; {claim['id']} is a new idea"] for lab in ("established", "reported", "contested")}
+    out["untested"] = [] if claim.get("settling_test") else ["needs the test that would settle it"]
+    out["tested"] = shared + test_problems(project, claim)
+    failing = [t["id"] for t in claim["tests"] if not testing.is_stale(project, t)
+               and any(r["pass"] is False for r in testing.runs(t))]
+    out["refuted"] = [] if failing else ["needs a run that reported pass=false"]
     return out
 
 
-def _independent_sources(project, ids: list[str]) -> int:
-    """Count sources that are distinct documents (different id and URL/title)."""
-    seen = set()
-    for sid in ids:
-        s = project.source(sid) or {}
-        key = (s.get("url") or s.get("title") or sid).strip().lower().rstrip("/")
-        seen.add(key)
-    return len(seen)
-
-
-def evaluate(project, claim: dict[str, Any]):
-    results = run_checks(project, claim)
-    record_results(claim, results)
-    return results, requirements(project, claim, results)
-
-
-def set_label(project, cid: str, label: str, by: str | None = None,
-              reason: str = "") -> tuple[bool, list[str], dict[str, Any]]:
-    """Gate: run the checks and set the label only if every requirement is met.
-
-    Returns (ok, unmet requirements, claim). Check results are saved either way.
-    """
-    if label not in LABELS:
-        raise ValueError(f"unknown label {label!r}; choose from {LABELS}")
+def set_label(project, cid: str, label: str) -> list[str]:
+    """Set the label if earned; return what is missing otherwise (empty = done)."""
     claim = project.claim(cid)
-    results, reqs = evaluate(project, claim)
-    unmet = reqs[label]
+    unmet = requirements(project, claim)[label]
     if not unmet:
-        old = claim["label"]
         claim["label"] = label
-        claim["history"].append({"at": now_iso(), "event": "label", "from": old, "to": label, "by": by, "reason": reason})
-    else:
-        claim["history"].append({"at": now_iso(), "event": "label-refused", "wanted": label, "by": by, "unmet": unmet})
-    project.put_claim(claim)
-    return not unmet, unmet, claim
+        project.put_claim(claim)
+    return unmet
 
 
-def strongest_allowed(claim: dict[str, Any], reqs: dict[str, list[str]]) -> str:
-    for label in FALLBACK_ORDER[claim["kind"]]:
-        if not reqs.get(label):
-            return label
-    return PENDING
-
-
-def audit(project, rerun_stale: bool = True, by: str = "audit", rerun_all: bool = False) -> list[dict[str, Any]]:
-    """Re-check every labelled claim (the notebook re-audit).
-
-    Tests whose script changed since it ran are re-run first (with fresh
-    held-out seeds), so a result cannot outlive the code that produced it. A
-    claim whose label is no longer earned moves to the strongest label it does
-    earn: a tested idea whose test now fails becomes refuted. Returns changes.
-    """
-    changes = []
-    claims = project.claims()
-    for claim in claims:
-        if rerun_stale:
-            for t in claim.get("tests", []):
-                if (rerun_all or testing.is_stale(project, t)) and (project.root / t["script"]).is_file():
-                    testing.execute(project, claim, t)
-                    claim["history"].append({"at": now_iso(), "event": "rerun", "test": t["id"], "by": by})
-        results, reqs = evaluate(project, claim)
-        cur = claim["label"]
-        if cur == PENDING or (cur in reqs and not reqs[cur]):
+def reaudit(project) -> list[dict[str, str]]:
+    """Re-run tests whose scripts changed, then move any label no longer earned to the
+    strongest one that is (a tested idea whose test now fails becomes refuted)."""
+    order = {"sourced": ("established", "contested", "reported"), "idea": ("refuted", "tested", "untested")}
+    claims, changes = project.claims(), []
+    for c in claims:
+        for t in c["tests"]:
+            if testing.is_stale(project, t) and (project.root / t["script"]).is_file():
+                testing.execute(project, t)
+        if c["label"] == "pending":
             continue
-        new = strongest_allowed(claim, reqs)
-        if new == cur:
+        reqs = requirements(project, c)
+        if not reqs[c["label"]] and not (c["label"] == "tested" and not reqs["refuted"]):
             continue
-        claim["label"] = new
-        reason = "; ".join(reqs.get(cur, []))[:500]
-        claim["history"].append({"at": now_iso(), "event": "downgrade", "from": cur, "to": new, "by": by, "reason": reason})
-        changes.append({"id": claim["id"], "from": cur, "to": new, "reason": reason})
+        new = next((lab for lab in order[c["kind"]] if not reqs[lab]), "pending")
+        changes.append({"id": c["id"], "from": c["label"], "to": new})
+        c["label"] = new
     project.save_claims(claims)
     return changes

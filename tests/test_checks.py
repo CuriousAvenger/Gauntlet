@@ -1,68 +1,39 @@
-from gauntlet.checks import like_for_like, provenance, quote_check, wording
+from conftest import PASSAGE
 
-TEXT = "We find that the method reduced shots by a factor of 8.0 at grid size 64.\nIt failed for turbulent flows."
-
-
-def _claim(statement, passage, sid="S1", **kw):
-    c = {"id": "C1", "kind": "sourced", "statement": statement, "agent": "reader-1",
-         "sources": [{"source_id": sid, "passage": passage, "side": "for"}], "tests": [], "comparisons": []}
-    c.update(kw)
-    return c
+from gauntlet import labels
 
 
-def test_find_passage_exact_and_ellipsis():
-    assert quote_check.find_passage("the method reduced shots by a factor of 8.0", TEXT)[0]
-    assert quote_check.find_passage("the method reduced shots ... It failed for turbulent flows", TEXT)[0]
-    ok, why = quote_check.find_passage("the method eliminated shots entirely", TEXT)
-    assert not ok and "diverges" in why
-    # fragments out of order do not match
-    assert not quote_check.find_passage("It failed for turbulent flows ... the method reduced shots", TEXT)[0]
+def test_find_passage():
+    text = "We find X.\nThe method cut shots by a fac-\ntor of 8.0 at grid 64. It failed for turbulence."
+    assert labels.find_passage("the method cut shots by a factor of 8.0", text)
+    assert labels.find_passage("The method cut shots ... It failed for turbulence", text)
+    assert not labels.find_passage("It failed for turbulence ... The method cut shots", text)
+    assert not labels.find_passage("the method cut shots by a factor of 11.3", text)
 
 
-def test_quote_check_against_saved_source(proj):
-    proj.add_source("Paper", "https://ex.org/p", TEXT, kind="preprint")
-    good = quote_check.check(proj, _claim("x", "the method reduced shots by a factor of 8.0 at grid size 64"))
-    assert good.passed
-    bad = quote_check.check(proj, _claim("x", "the method reduced shots by a factor of 11.3 at grid size 64"))
-    assert not bad.passed
-    short = quote_check.check(proj, _claim("x", "reduced"))
-    assert not short.passed
+def test_misquote_and_unread_source(call, project):
+    r = call("record_claim", statement="Readout cut shots tenfold.",
+             evidence=[{"source_id": "S1", "passage": "the readout cut shots tenfold in every test"}])
+    assert any("not found verbatim" in f for f in r["fix"])
+    call("save_source", kind="peer-reviewed", url="https://ex.org/pay", unread_reason="paywalled")
+    try:
+        call("record_claim", statement="A paywalled review agrees.", evidence=[{"source_id": "S3", "passage": "x" * 30}])
+        assert False
+    except Exception as e:
+        assert "cannot be cited" in str(e)
 
 
-def test_quote_check_detects_tampered_source(proj):
-    proj.add_source("Paper", "https://ex.org/p", TEXT, kind="preprint")
-    (proj.root / "sources" / "S1.txt").write_text(TEXT + "\nThe method also cures everything.")
-    res = quote_check.check(proj, _claim("x", "the method reduced shots by a factor of 8.0"))
-    assert not res.passed and "modified" in res.details[0]
+def test_modified_source_fails_quote(call, project):
+    cid = call("record_claim", statement="Shots fell 8.0-fold.", evidence=[{"source_id": "S1", "passage": PASSAGE}])["claim_id"]
+    assert labels.quote_problems(project, project.claim(cid)) == []
+    (project.root / "sources/S1.txt").write_text("edited")
+    assert "modified" in labels.quote_problems(project, project.claim(cid))[0]
 
 
-def test_unread_source_cannot_be_cited(proj):
-    proj.add_source("Paywalled", "https://ex.org/pw", None, unread_reason="paywalled")
-    res = quote_check.check(proj, _claim("x", "anything at all in this passage text"))
-    assert not res.passed and "unread" in res.details[0]
-
-
-def test_provenance_rounding(proj):
-    c = _claim("Shots fell 8-fold.", "reduced shots by a factor of 8.0")
-    assert provenance.check(proj, c).passed
-    c = _claim("Shots fell 11.3-fold.", "reduced shots by a factor of 8.0")
-    assert not provenance.check(proj, c).passed
-    c = _claim("Shots fell by 8.14.", "a factor of 8.1 was seen")
-    assert not provenance.check(proj, c).passed  # more precision than the evidence
-
-
-def test_like_for_like():
-    stmt = "The method needs 8 times fewer shots than the baseline."
-    assert not like_for_like.check(None, _claim(stmt, "")).passed
-    same = {"unit": "shots", "baseline": "uniform", "scale": "n=64"}
-    ok = _claim(stmt, "", comparisons=[{"a": {"value": 8, **same}, "b": {"value": 1, **same}}])
-    assert like_for_like.check(None, ok).passed
-    diff = _claim(stmt, "", comparisons=[{"a": {"value": 8, **same}, "b": {"value": 1, **same, "scale": "n=16"}}])
-    assert not like_for_like.check(None, diff).passed
-    assert like_for_like.check(None, _claim("Sleep matters for memory.", "")).passed
-
-
-def test_wording_lint():
-    assert wording.lint("This novel method is the first to do it.")
-    assert wording.lint("We proved that it holds.")
-    assert not wording.lint("Not found in the sources read; tested on 3 seeds.")
+def test_provenance_rounding(call, project):
+    def problems(statement):
+        cid = call("record_claim", statement=statement, evidence=[{"source_id": "S1", "passage": PASSAGE}])["claim_id"]
+        return labels.provenance_problems(project, project.claim(cid))
+    assert problems("Shots fell 8-fold at precision 0.01.") == []
+    assert problems("Shots fell 11.3-fold.")
+    assert problems("Shots fell 8.04-fold.")  # more precision than the evidence shows
