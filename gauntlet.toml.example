@@ -1,0 +1,25 @@
+# Copy to gauntlet.toml (in the directory you run gauntlet from) to override defaults.
+
+[models]               # which model fills each tier
+strong = "claude-opus-5-5"     # scope, synthesize, check (referee)
+mid    = "claude-sonnet-5-5"   # report (writer)
+cheap  = "claude-haiku-5-5"    # survey (readers), explore (ideator, prover, breaker)
+
+# USD per million tokens, for models not in the built-in table.
+# [prices."my-local-model"]
+# input = 0.0
+# output = 0.0
+
+[depth.quick]
+budget_usd = 5.0
+
+[depth.standard]
+budget_usd = 10.0
+
+[depth.deep]
+budget_usd = 40.0
+max_cycles = 6
+
+[checks]
+replication_rel_tol = 0.10   # headline numbers from two agents must agree within 10%
+stale_cycles = 3             # deep mode stops after this many cycles with no new evidence
