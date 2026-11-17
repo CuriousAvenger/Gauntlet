@@ -1,9 +1,9 @@
 """The research folder's records, as plain files the agent can read directly.
 
-The research folder is the copy of the Gauntlet template that contains `skills/`
+The research folder is the copy of the Gauntlet template that contains `.skills/`
 (override with $GAUNTLET_ROOT):
 
-  QUESTION.md          the problem, written by the user
+  AGENTS.md            the question (under "## Question"), written by the user
   sources/index.json   url -> saved copy (S1.txt, ...) with its hash, or why it was unreadable
   sources/S1.txt ...   exact text Gauntlet fetched
   claims.jsonl         claims and ideas: quotes, tests, labels
@@ -16,6 +16,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import tempfile
 from pathlib import Path
 from typing import Any
@@ -36,25 +37,25 @@ def sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-TEMPLATE_ROOT = Path(__file__).resolve().parents[4]  # lib -> scripts -> gauntlet -> skills -> root
+TEMPLATE_ROOT = Path(__file__).resolve().parents[4]  # lib -> scripts -> gauntlet -> .skills -> root
 
 
 class Project:
     def __init__(self):
         self.root = Path(os.environ.get("GAUNTLET_ROOT") or TEMPLATE_ROOT)
-        self.question_path = self.root / "QUESTION.md"
+        self.agents_path = self.root / "AGENTS.md"
         self.report_path = self.root / "report.md"
         self._index = self.root / "sources" / "index.json"
         self._claims = self.root / "claims.jsonl"
 
     def question(self) -> str:
-        """The first line of QUESTION.md that is not a heading or the template's placeholder."""
-        if self.question_path.exists():
-            for line in self.question_path.read_text().splitlines():
-                line = line.strip()
-                if line and not line.startswith(("#", ">")) and line != "Write your research question here.":
-                    return line
-        return ""
+        """The first line under '## Question' in AGENTS.md, unless it is still the placeholder."""
+        if not self.agents_path.exists():
+            return ""
+        section = re.search(r"^## Question\s*$(.*?)(?=^## |\Z)", self.agents_path.read_text(), re.M | re.S)
+        text = re.sub(r"<!--.*?-->", "", section.group(1), flags=re.S) if section else ""
+        line = next((l.strip() for l in text.splitlines() if l.strip()), "")
+        return "" if line == "Write your research question here." else line
 
     # ---- sources -------------------------------------------------------------
     def sources(self) -> dict[str, dict[str, Any]]:

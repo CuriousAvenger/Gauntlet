@@ -13,8 +13,8 @@ labels the evidence has not earned.
 
 ## The scripts
 
-Run them with `python3 skills/gauntlet/scripts/<script>` from the research folder (the
-folder containing `QUESTION.md`). Each prints JSON. Records are plain files in that folder
+Run them with `python3 .skills/gauntlet/scripts/<script>` from the research folder (the
+folder containing `AGENTS.md`). Each prints JSON. Records are plain files in that folder
 that you can read directly: `claims.jsonl`, `sources/`, `runs/`, and later `report.md`.
 
 | Script | Use it to |
@@ -26,11 +26,11 @@ that you can read directly: `claims.jsonl`, `sources/`, `runs/`, and later `repo
 | `report.py --answer FILE` | Re-check everything and write `report.md` |
 
 Each script's `--help` shows its exact usage. In the role files, `scripts/` means
-`skills/gauntlet/scripts/`.
+`.skills/gauntlet/scripts/`.
 
 ## The loop
 
-1. **Scope.** Read the question in `QUESTION.md` and restate it. Ask one clarifying question only if it would change
+1. **Scope.** Read the question in `AGENTS.md` and restate it. Ask one clarifying question only if it would change
    what to read. Choose a depth: *quick* (~10 sources, ideas left untested), *standard*
    (~30 sources, top 3 ideas tested), *deep* (50+ sources, repeat steps 3–5 while new
    evidence keeps arriving, up to 6 rounds). Plan 3–8 sub-questions; see the field guide below.

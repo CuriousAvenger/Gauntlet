@@ -12,18 +12,17 @@ Python 3.10+ and nothing else.
 
 1. Copy this repository into a new folder for one research problem (on GitHub: *Use this
    template*).
-2. Write the question in `QUESTION.md`.
+2. Write the question under `## Question` in `AGENTS.md`.
 3. Open the folder with your agent and ask it to research the question.
 
-`AGENTS.md` points the agent to `skills/gauntlet/SKILL.md`, which holds the research loop.
-`skills/gauntlet/` is also a standard Agent Skills folder, for agents that load skills.
+`AGENTS.md` also points the agent to `.skills/gauntlet/SKILL.md`, which holds the research
+loop. `.skills/gauntlet/` is a standard Agent Skills folder, for agents that load skills.
 
 ## What the folder holds
 
 ```
-QUESTION.md       the problem (you write this)
-AGENTS.md         tells any agent how to work here
-skills/gauntlet/
+AGENTS.md         the question (you write it) and how any agent should work here
+.skills/gauntlet/
   SKILL.md        the research loop, rules and field guide
   roles/          reader, synthesizer, ideator, prover, breaker, referee, writer
   scripts/        source.py, claim.py, run_test.py, label.py, report.py

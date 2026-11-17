@@ -34,6 +34,8 @@ def test_report_rechecks_edited_tests(run, tmp_path):
 def test_title_comes_from_question_file(run, tmp_path):
     (tmp_path / "answer.md").write_text("Nothing was found in the sources read.")
     assert run("report.py", "--answer", "answer.md")[0] == 2  # no question anywhere
-    (tmp_path / "QUESTION.md").write_text("# Question\n\nDoes readout cut shots?\n")
+    (tmp_path / "AGENTS.md").write_text("# Agent instructions\n\n## Question\n\nWrite your research question here.\n")
+    assert run("report.py", "--answer", "answer.md")[0] == 2  # placeholder only
+    (tmp_path / "AGENTS.md").write_text("# Agent instructions\n\n## Question\n\nDoes readout cut shots?\n\n## How\n")
     assert run("report.py", "--answer", "answer.md")[0] == 0
     assert (tmp_path / "report.md").read_text().startswith("# Does readout cut shots?")

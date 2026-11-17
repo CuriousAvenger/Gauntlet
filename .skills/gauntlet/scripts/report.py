@@ -3,7 +3,7 @@
 
   report.py --answer answer.md [--high-stakes] [--draft]
 
-The report's title is the question in QUESTION.md (or pass --question).
+The report's title is the question in AGENTS.md (or pass --question).
 
 Cite claims in the answer as [C3] or [C3, C7]. Refused if the answer cites a claim with no
 label or an idea that is not tested, or states a number without citing a claim. --draft
@@ -23,7 +23,7 @@ a = p.parse_args()
 project = Project()
 question = a.question or project.question()
 if not question:
-    fail("write the question in QUESTION.md (or pass --question)")
+    fail("write the question under '## Question' in AGENTS.md (or pass --question)")
 problems = build(project, question, open(a.answer, encoding="utf-8").read(), a.high_stakes, a.draft)
 if problems and not a.draft:
     finish({"refused": "report not written", "fix": problems}, 1)
