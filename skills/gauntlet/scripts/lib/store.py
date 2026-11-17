@@ -1,6 +1,9 @@
-"""Records for one research project, as plain files the agent can read directly.
+"""The research folder's records, as plain files the agent can read directly.
 
-research/<project>/
+The research folder is the copy of the Gauntlet template that contains `skills/`
+(override with $GAUNTLET_ROOT):
+
+  QUESTION.md          the problem, written by the user
   sources/index.json   url -> saved copy (S1.txt, ...) with its hash, or why it was unreadable
   sources/S1.txt ...   exact text Gauntlet fetched
   claims.jsonl         claims and ideas: quotes, tests, labels
@@ -13,7 +16,6 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-import re
 import tempfile
 from pathlib import Path
 from typing import Any
@@ -34,16 +36,25 @@ def sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+TEMPLATE_ROOT = Path(__file__).resolve().parents[4]  # lib -> scripts -> gauntlet -> skills -> root
+
+
 class Project:
-    def __init__(self, name: str):
-        slug = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")[:60]
-        if not slug:
-            raise ValueError("the project name needs letters or digits")
-        home = Path(os.environ.get("GAUNTLET_HOME") or Path.cwd() / "research")
-        self.root = home / slug
+    def __init__(self):
+        self.root = Path(os.environ.get("GAUNTLET_ROOT") or TEMPLATE_ROOT)
+        self.question_path = self.root / "QUESTION.md"
         self.report_path = self.root / "report.md"
         self._index = self.root / "sources" / "index.json"
         self._claims = self.root / "claims.jsonl"
+
+    def question(self) -> str:
+        """The first line of QUESTION.md that is not a heading or the template's placeholder."""
+        if self.question_path.exists():
+            for line in self.question_path.read_text().splitlines():
+                line = line.strip()
+                if line and not line.startswith(("#", ">")) and line != "Write your research question here.":
+                    return line
+        return ""
 
     # ---- sources -------------------------------------------------------------
     def sources(self) -> dict[str, dict[str, Any]]:

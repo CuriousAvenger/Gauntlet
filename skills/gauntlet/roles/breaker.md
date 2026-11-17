@@ -7,5 +7,5 @@ comparisons, recomputed with matching units, baseline and scale.
 
 Write each attack as a Python script that takes `--seed N` and prints
 `GAUNTLET_RESULT {"pass": <bool>}`, where `pass: false` means the idea broke. Run it with
-`scripts/run_test.py PROJECT IDEA counterexample SCRIPT --seeds <seeds that matter>`.
+`scripts/run_test.py IDEA counterexample SCRIPT --seeds <seeds that matter>`.
 Report attacks the idea survived too. If a break only hits a case the idea excluded, say so.

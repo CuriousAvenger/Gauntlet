@@ -1,11 +1,9 @@
-# Working on Gauntlet
+# Agent instructions
 
-Gauntlet is one Agent Skills folder: `skills/gauntlet/`. `SKILL.md` and `roles/` hold the
-instructions; `scripts/` holds the checks a model cannot reliably do for itself.
+This folder researches the question in `QUESTION.md` with Gauntlet. For any research work
+here, follow `skills/gauntlet/SKILL.md`: it describes the research loop, the roles and the
+scripts that check every claim.
 
-- Keep it provider-agnostic: no agent-specific files, tool names or wording.
-- Scripts: Python 3.10+, standard library only, one JSON object on stdout,
-  exit 0 = done, 1 = refused, 2 = misuse.
-- Before adding code, ask whether an instruction could do the job instead. Code is only for
-  checks that must not depend on the model's honesty or memory.
-- Tests live in `skills/gauntlet/scripts/tests/`; `pytest` must pass.
+Records live in this folder: `sources/` (exact copies of sources), `claims.jsonl`,
+`runs/` (test scripts and logs), `evidence_map.md`, `answer.md` and `report.md`. Change
+them only through the scripts in `skills/gauntlet/scripts/`.

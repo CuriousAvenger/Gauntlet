@@ -2,7 +2,7 @@
 """Run a test of an idea. Gauntlet freezes a copy of the script and runs it itself: on your
 seeds, then (support and replication) on held-out seeds it picks at random.
 
-  run_test.py PROJECT IDEA_ID ROLE SCRIPT [--seeds 0,1] [--replicates TEST_ID]
+  run_test.py IDEA_ID ROLE SCRIPT [--seeds 0,1] [--replicates TEST_ID]
 
 ROLE is support (the test of the idea), replication (independently written code for test
 --replicates), or counterexample (an attack: pass=false means the idea broke).
@@ -17,11 +17,11 @@ from lib.runner import ROLES, new_test
 from lib.store import Project
 
 p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-p.add_argument("project"); p.add_argument("idea"); p.add_argument("role", choices=ROLES); p.add_argument("script")
+p.add_argument("idea"); p.add_argument("role", choices=ROLES); p.add_argument("script")
 p.add_argument("--seeds", default="0"); p.add_argument("--replicates")
 a = p.parse_args()
 
-project = Project(a.project)
+project = Project()
 try:
     idea = project.claim(a.idea)
 except KeyError as e:

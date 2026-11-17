@@ -5,7 +5,7 @@
   new idea:            {"statement": "...", "settling_test": "the test that would settle it"}
   more quotes:         {"add_to": "C3", "quotes": [...]}
 
-  claim.py PROJECT <<'EOF'
+  claim.py <<'EOF'
   {...}
   EOF
 
@@ -25,9 +25,9 @@ if len(sys.argv) > 1 and sys.argv[1] in ("-h", "--help"):
     print(__doc__)
     sys.exit(0)
 
-if len(sys.argv) != 2:
-    fail("usage: claim.py PROJECT < request.json")
-project = Project(sys.argv[1])
+if len(sys.argv) != 1:
+    fail("usage: claim.py < request.json")
+project = Project()
 try:
     req = json.load(sys.stdin)
 except json.JSONDecodeError as e:

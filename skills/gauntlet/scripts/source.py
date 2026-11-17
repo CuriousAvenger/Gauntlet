@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Fetch a page and keep an exact copy; quotes are later checked against this copy.
 
-  source.py PROJECT URL                    first 8000 characters of the saved text
-  source.py PROJECT URL --from 8000        the next part
-  source.py PROJECT URL --find REGEX       matching lines, to copy quotes word for word
-  source.py PROJECT URL --text-file F      save text you read yourself, for a page Gauntlet cannot fetch
+  source.py URL                    first 8000 characters of the saved text
+  source.py URL --from 8000        the next part
+  source.py URL --find REGEX       matching lines, to copy quotes word for word
+  source.py URL --text-file F      save text you read yourself, for a page Gauntlet cannot fetch
 """
 import argparse
 import re
@@ -16,12 +16,12 @@ from lib.store import Project
 CHUNK = 8000
 
 p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-p.add_argument("project"); p.add_argument("url")
+p.add_argument("url")
 p.add_argument("--from", dest="start", type=int, default=0)
 p.add_argument("--find"); p.add_argument("--text-file")
 a = p.parse_args()
 
-project = Project(a.project)
+project = Project()
 try:
     page = open(a.text_file, encoding="utf-8").read() if a.text_file else None
     src = project.source(a.url, page)

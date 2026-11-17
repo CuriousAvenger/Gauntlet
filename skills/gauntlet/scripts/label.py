@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Give a claim a label; refused, with what is missing, unless the evidence earns it.
 
-  label.py PROJECT CLAIM_ID LABEL
+  label.py CLAIM_ID LABEL
 
 Claims from sources: established (2+ independent sources agree), reported (one source),
 contested (quotes on both sides). Ideas: tested (support test passed on held-out seeds and
@@ -17,9 +17,9 @@ if len(sys.argv) > 1 and sys.argv[1] in ("-h", "--help"):
     print(__doc__)
     sys.exit(0)
 
-if len(sys.argv) != 4 or sys.argv[3] not in LABELS:
-    fail(f"usage: label.py PROJECT CLAIM_ID LABEL, where LABEL is one of {', '.join(LABELS)}")
-project, cid, label = Project(sys.argv[1]), sys.argv[2], sys.argv[3]
+if len(sys.argv) != 3 or sys.argv[2] not in LABELS:
+    fail(f"usage: label.py CLAIM_ID LABEL, where LABEL is one of {', '.join(LABELS)}")
+project, cid, label = Project(), sys.argv[1], sys.argv[2]
 try:
     claim = project.claim(cid)
 except KeyError as e:

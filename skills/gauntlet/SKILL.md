@@ -13,24 +13,24 @@ labels the evidence has not earned.
 
 ## The scripts
 
-Run them with `python3 <this skill's folder>/scripts/<script>`. Each prints JSON. Pick a
-short project name (e.g. `readout-shots`) and pass it every time; records go to
-`research/<project>/` in the current directory, where you can read them directly
-(`claims.jsonl`, `sources/`, `runs/`).
+Run them with `python3 skills/gauntlet/scripts/<script>` from the research folder (the
+folder containing `QUESTION.md`). Each prints JSON. Records are plain files in that folder
+that you can read directly: `claims.jsonl`, `sources/`, `runs/`, and later `report.md`.
 
 | Script | Use it to |
 |---|---|
-| `source.py PROJECT URL [--find REGEX]` | Read a source. Gauntlet fetches it and keeps an exact copy; quote from this text, not from your own web tools, which may summarise |
-| `claim.py PROJECT` (JSON on stdin) | Record a claim with quotes, or an idea with the test that would settle it |
-| `run_test.py PROJECT IDEA ROLE SCRIPT` | Have Gauntlet run a test script on your seeds and on held-out seeds |
-| `label.py PROJECT ID LABEL` | Give a claim a label; refused, with reasons, unless earned |
-| `report.py PROJECT --question Q --answer FILE` | Re-check everything and write `report.md` |
+| `source.py URL [--find REGEX]` | Read a source. Gauntlet fetches it and keeps an exact copy; quote from this text, not from your own web tools, which may summarise |
+| `claim.py` (JSON on stdin) | Record a claim with quotes, or an idea with the test that would settle it |
+| `run_test.py IDEA ROLE SCRIPT` | Have Gauntlet run a test script on your seeds and on held-out seeds |
+| `label.py ID LABEL` | Give a claim a label; refused, with reasons, unless earned |
+| `report.py --answer FILE` | Re-check everything and write `report.md` |
 
-Each script's `--help` shows its exact usage.
+Each script's `--help` shows its exact usage. In the role files, `scripts/` means
+`skills/gauntlet/scripts/`.
 
 ## The loop
 
-1. **Scope.** Restate the question. Ask one clarifying question only if it would change
+1. **Scope.** Read the question in `QUESTION.md` and restate it. Ask one clarifying question only if it would change
    what to read. Choose a depth: *quick* (~10 sources, ideas left untested), *standard*
    (~30 sources, top 3 ideas tested), *deep* (50+ sources, repeat steps 3–5 while new
    evidence keeps arriving, up to 6 rounds). Plan 3–8 sub-questions; see the field guide below.
@@ -44,7 +44,7 @@ Each script's `--help` shows its exact usage.
 6. **Report** (role: `roles/writer.md`). The writer drafts the answer; `report.py` re-checks
    every label and builds the report around it.
 
-If you can start subagents, give each one the role file, its task and the project name.
+If you can start subagents, give each one the role file and its task.
 Use a fast model for readers, ideators, provers and breakers, and your strongest model for
 the synthesizer and referees. If you cannot, play the roles yourself, one at a time.
 
