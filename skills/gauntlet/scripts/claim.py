@@ -16,10 +16,10 @@ so they can be fixed now; the claim stays pending until a referee labels it.
 import json
 import sys
 
-from gauntlet.checks import number_problems, quote_problems
-from gauntlet.cli import fail, finish
-from gauntlet.fetch import FetchError
-from gauntlet.store import Project
+from lib.checks import number_problems, quote_problems
+from lib.cli import fail, finish
+from lib.fetch import FetchError
+from lib.store import Project
 
 if len(sys.argv) > 1 and sys.argv[1] in ("-h", "--help"):
     print(__doc__)

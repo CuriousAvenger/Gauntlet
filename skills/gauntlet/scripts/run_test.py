@@ -12,9 +12,9 @@ The script takes --seed N and ends by printing:
 import argparse
 from pathlib import Path
 
-from gauntlet.cli import fail, finish
-from gauntlet.runner import ROLES, new_test
-from gauntlet.store import Project
+from lib.cli import fail, finish
+from lib.runner import ROLES, new_test
+from lib.store import Project
 
 p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
 p.add_argument("project"); p.add_argument("idea"); p.add_argument("role", choices=ROLES); p.add_argument("script")

@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-SCRIPTS = Path(__file__).resolve().parent.parent / "skills" / "gauntlet" / "scripts"
+SCRIPTS = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(SCRIPTS))
 
 PAGE = ("Using importance-weighted readout, the number of shots needed to reach precision 0.01 "

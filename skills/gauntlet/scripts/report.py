@@ -9,9 +9,9 @@ writes it anyway, marked as a draft. --high-stakes adds a not-advice notice.
 """
 import argparse
 
-from gauntlet.cli import finish
-from gauntlet.report import build
-from gauntlet.store import Project
+from lib.cli import finish
+from lib.report import build
+from lib.store import Project
 
 p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
 p.add_argument("project"); p.add_argument("--question", required=True); p.add_argument("--answer", required=True)

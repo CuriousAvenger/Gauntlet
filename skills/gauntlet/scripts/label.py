@@ -9,9 +9,9 @@ an independent replication agrees), refuted (a run failed), untested.
 """
 import sys
 
-from gauntlet.checks import LABELS, NAMES, unmet
-from gauntlet.cli import fail, finish
-from gauntlet.store import Project
+from lib.checks import LABELS, NAMES, unmet
+from lib.cli import fail, finish
+from lib.store import Project
 
 if len(sys.argv) > 1 and sys.argv[1] in ("-h", "--help"):
     print(__doc__)

@@ -8,4 +8,4 @@ instructions; `scripts/` holds the checks a model cannot reliably do for itself.
   exit 0 = done, 1 = refused, 2 = misuse.
 - Before adding code, ask whether an instruction could do the job instead. Code is only for
   checks that must not depend on the model's honesty or memory.
-- `pytest` must pass.
+- Tests live in `skills/gauntlet/scripts/tests/`; `pytest` must pass.

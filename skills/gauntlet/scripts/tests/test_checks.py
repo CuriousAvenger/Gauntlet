@@ -1,4 +1,4 @@
-from gauntlet.checks import normalize, numbers, quote_in
+from lib.checks import normalize, numbers, quote_in
 
 
 def test_quote_in():

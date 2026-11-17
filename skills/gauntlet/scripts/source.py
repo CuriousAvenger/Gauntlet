@@ -9,9 +9,9 @@
 import argparse
 import re
 
-from gauntlet.cli import fail, finish
-from gauntlet.fetch import FetchError
-from gauntlet.store import Project
+from lib.cli import fail, finish
+from lib.fetch import FetchError
+from lib.store import Project
 
 CHUNK = 8000
 
