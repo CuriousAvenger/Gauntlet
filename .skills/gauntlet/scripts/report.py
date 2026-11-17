@@ -15,8 +15,10 @@ import re
 
 from claim import claims
 from label import NAMES, reaudit
+from rank import diverse_top, ratings
 from source import ROOT, fail, finish, sources, write_file
 
+FRONTIER = 5
 CITE = re.compile(r"\[((?:[CI]\d+)(?:\s*,\s*[CI]\d+)*)\]")
 MEANINGS = {"established": "Independent sources agree", "reported": "One source says so",
             "contested": "Sources disagree", "tested": "Proposed here, passed a test",
@@ -74,8 +76,19 @@ def render(title, answer, rows, changes, high_stakes, problems):
     out += ["", "## Answer", "", CITE.sub(cited, answer.strip()), ""]
     out += section("Findings", ("established", "reported", "contested"),
                    lambda c: f" _({', '.join(q['source'] for q in c['quotes'])})_")
+    elo, _ = ratings()
     out += section("New ideas", ("tested", "refuted", "untested"),
-                   lambda c: f"\n  - Would be settled by: {c['settling_test']}" if c["label"] == "untested" else "")
+                   lambda c: f" _(Elo {round(elo[c['id']])})_" if c["id"] in elo else "")
+
+    frontier = [by_id[r["id"]] for r in diverse_top(FRONTIER) if r["label"] == "untested"]
+    out += ["## Frontier", "", "The strongest untested ideas, one per cluster of similar ideas, with the closest "
+            "work found in the sources read. Each is a lead, not a finding.", ""]
+    for c in frontier:
+        out += [f"### {c['id']}: {c['statement']}", ""]
+        out += [f"- Closest prior work: {q['source']}, \"{q['quote']}\"" for q in c.get("prior_work", [])]
+        out += [f"- What it adds: {c.get('difference', '')}", f"- Would be settled by: {c['settling_test']}", ""]
+    if not frontier:
+        out += ["None.", ""]
 
     out += ["## What was not checked", ""]
     pending = [c["id"] for c in rows if c["label"] == "pending"]
@@ -92,6 +105,9 @@ def render(title, answer, rows, changes, high_stakes, problems):
     for c in rows:
         out += [f"**{c['id']}** ({NAMES[c['label']]}) {c['statement']}", ""]
         out += [f"- {q['source']}{' (disagrees)' if q.get('disagrees') else ''}: \"{q['quote']}\"" for q in c["quotes"]]
+        out += [f"- Prior work, {q['source']}: \"{q['quote']}\"" for q in c.get("prior_work", [])]
+        if c.get("difference"):
+            out.append(f"- Difference claimed: {c['difference']}")
         for t in c["tests"]:
             seeds = ", ".join(f"{r['seed']}{'*' if r['held_out'] else ''} "
                               f"{'pass' if r['pass'] else 'fail' if r['pass'] is False else 'error'}" for r in t["runs"])

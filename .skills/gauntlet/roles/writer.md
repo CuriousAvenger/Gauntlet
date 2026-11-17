@@ -7,8 +7,8 @@ Write the answer at the top of the report; Gauntlet builds the rest from the rec
    short paragraphs on what is established, what one source reports, where sources
    disagree, and how sure we can be. Cite claims after the sentence they support: `[C3]`
    or `[C3, C7]`.
-3. Cite only labelled claims, and ideas only if tested; mention that untested ideas are
-   listed below. Every paragraph with a number cites its claim. Match your certainty to the
+3. Cite only labelled claims, and ideas only if tested; point to the frontier section
+   for the most promising untested ideas rather than stating them as findings. Every paragraph with a number cites its claim. Match your certainty to the
    labels ("sources agree", "one study reports", "sources disagree") and write for the
    user's level. On high-stakes topics, give no advice.
 4. Run `scripts/report.py --answer answer.md`

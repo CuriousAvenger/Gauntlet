@@ -4,8 +4,9 @@
   label.py CLAIM_ID LABEL
 
 Claims from sources: established (2+ independent sources agree), reported (one source),
-contested (quotes on both sides). Ideas: tested (support test passed on held-out seeds and
-an independent replication agrees), refuted (a run failed), untested.
+contested (quotes on both sides). Ideas: untested (grounded: closest prior work quoted and
+the difference stated), tested (also passed on held-out seeds and an independent replication
+agrees), refuted (a run failed).
 
 This file also owns the label rules and the re-audit that report.py runs.
 """
@@ -15,7 +16,7 @@ import sys
 from statistics import mean
 from typing import Any
 
-from claim import claims, get_claim, number_problems, put_claim, quote_problems, save_claims
+from claim import claims, get_claim, grounding_problems, number_problems, put_claim, quote_problems, save_claims
 from run_test import execute, is_stale
 from source import ROOT, fail, finish
 
@@ -74,8 +75,9 @@ def unmet(claim: dict[str, Any]) -> dict[str, list[str]]:
     out = {label: [f"{claim['id']} is {'an idea' if is_idea else 'a claim from sources'}"] for label in LABELS}
     common = quote_problems(claim) + number_problems(claim)
     if is_idea:
-        out["untested"] = []
-        out["tested"] = common + test_problems(claim)
+        grounding = grounding_problems(claim)
+        out["untested"] = grounding
+        out["tested"] = common + grounding + test_problems(claim)
         failed = any(r["pass"] is False for t in claim["tests"] if not is_stale(t) for r in t["runs"])
         out["refuted"] = [] if failed else ["no run has reported pass=false"]
         return out

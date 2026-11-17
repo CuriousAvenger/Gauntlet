@@ -5,6 +5,11 @@ to research, write the question, and let your agent work on it. The result is a 
 where **every claim shows how it was checked**: facts carry exact quotes from saved
 sources, and new ideas carry the tests they passed or failed, or say they are untested.
 
+Beyond answering, it explores. Ideators working from different fields propose ideas,
+judges compare them in a tournament, and the strongest ideas from different clusters
+are tested, then evolved into the next generation. Every idea must quote the closest
+existing work and say what it adds, because models are poor judges of their own novelty.
+
 It works with any agent that has a shell and reads `AGENTS.md` or loads skills. It needs
 Python 3.10+ and nothing else.
 
@@ -24,17 +29,20 @@ loop. `.skills/gauntlet/` is a standard Agent Skills folder, for agents that loa
 AGENTS.md         the question (you write it) and how any agent should work here
 .skills/gauntlet/
   SKILL.md        the research loop, rules and field guide
-  roles/          reader, synthesizer, ideator, prover, breaker, referee, writer
+  roles/          reader, synthesizer, ideator, judge, prover, breaker, referee, writer
   scripts/
     source.py     reads sources and keeps exact copies
-    claim.py      records claims and ideas; checks quotes and numbers
+    claim.py      records claims and ideas; checks quotes and numbers; filters duplicate ideas
+    rank.py       pairs ideas for judging, keeps Elo scores, picks the best of each cluster
     run_test.py   runs tests on the agent's seeds and on held-out seeds
     label.py      gives labels the evidence earns
     report.py     re-checks everything and writes the report
+    lib/          specialised helpers (word-overlap similarity)
     tests/        tests for the scripts
 sources/          exact copies of every source read
 runs/             test scripts and the log of every run
 claims.jsonl      every claim and idea, with quotes, tests and label   (created by the run)
+tournament.jsonl  every judged comparison of two ideas                (created by the run)
 evidence_map.md   what sources agree and disagree on, what is open      (created by the run)
 report.md         the final report                                      (created by the run)
 ```
@@ -48,6 +56,8 @@ reliably do for itself:
 |---|---|
 | reads a source (`source.py`) | fetches the page itself and keeps an exact copy |
 | records a claim with a quote (`claim.py`) | confirms the quote is word for word in that copy and every number traces to it |
+| proposes an idea (`claim.py`) | requires the closest prior work quoted word for word, refuses near-duplicates of earlier ideas, and suggests the closest passages to quote |
+| judges two ideas (`rank.py`) | records the verdict, recomputes Elo scores from every verdict, and groups similar ideas so the top stays diverse |
 | tests an idea (`run_test.py`) | runs the code itself, on the agent's seeds and on held-out seeds it picks at random |
 | labels a claim (`label.py`) | refuses any label the evidence has not earned |
 | writes the answer (`report.py`) | re-checks every label, refuses an answer that overstates, and builds the report |
@@ -59,7 +69,7 @@ reliably do for itself:
 | Contested | Quotes on both sides |
 | New idea: tested | Passed on held-out seeds, and independently written code reproduces the result within 10% |
 | New idea: refuted | A run failed |
-| New idea: untested | States the test that would settle it |
+| New idea: untested | Closest prior work quoted word for word, the difference stated, and the test that would settle it |
 
 ## Working on Gauntlet itself
 

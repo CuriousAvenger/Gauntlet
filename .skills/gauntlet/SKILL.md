@@ -1,6 +1,6 @@
 ---
 name: gauntlet
-description: Research a question and answer it with checked claims. Use when the user asks what the evidence says, whether something is true, for a literature review, or to investigate or compare findings in any field. Every claim in the report carries a label showing how it was checked (exact quotes from saved sources, tests on held-out data, independent replication), and new ideas are labelled tested, refuted or untested.
+description: Research a question, answer it with checked claims, and explore new ideas. Use when the user asks what the evidence says, whether something is true, for a literature review, for new research directions, or to investigate or compare findings in any field. Every claim in the report carries a label showing how it was checked (exact quotes from saved sources, tests on held-out data, independent replication); new ideas evolve through a tournament and are labelled tested, refuted or untested, each with its closest prior work.
 ---
 
 # Gauntlet
@@ -15,12 +15,14 @@ labels the evidence has not earned.
 
 Run them with `python3 .skills/gauntlet/scripts/<script>` from the research folder (the
 folder containing `AGENTS.md`). Each prints JSON. Records are plain files in that folder
-that you can read directly: `claims.jsonl`, `sources/`, `runs/`, and later `report.md`.
+that you can read directly: `claims.jsonl`, `sources/`, `runs/`, `tournament.jsonl`, and later
+`report.md`.
 
 | Script | Use it to |
 |---|---|
 | `source.py URL [--find REGEX]` | Read a source. Gauntlet fetches it and keeps an exact copy; quote from this text, not from your own web tools, which may summarise |
-| `claim.py` (JSON on stdin) | Record a claim with quotes, or an idea with the test that would settle it |
+| `claim.py` (JSON on stdin) | Record a claim with quotes, or an idea with its closest prior work and the test that would settle it |
+| `rank.py pairs` / `match` / `top` | Get pairs of ideas to compare, record verdicts, and see the leaderboard and the diverse top |
 | `run_test.py IDEA ROLE SCRIPT` | Have Gauntlet run a test script on your seeds and on held-out seeds |
 | `label.py ID LABEL` | Give a claim a label; refused, with reasons, unless earned |
 | `report.py --answer FILE` | Re-check everything and write `report.md` |
@@ -30,26 +32,42 @@ Each script's `--help` shows its exact usage. In the role files, `scripts/` mean
 
 ## The loop
 
-1. **Scope.** Read the question in `AGENTS.md` and restate it. Ask one clarifying question only if it would change
-   what to read. Choose a depth: *quick* (~10 sources, ideas left untested), *standard*
-   (~30 sources, top 3 ideas tested), *deep* (50+ sources, repeat steps 3–5 while new
-   evidence keeps arriving, up to 6 rounds). Plan 3–8 sub-questions; see the field guide below.
+1. **Scope.** Read the question in `AGENTS.md` and restate it. Ask one clarifying question
+   only if it would change what to read. Choose a depth (table below) and plan 3–8
+   sub-questions; see the field guide.
 2. **Read** (role: `roles/reader.md`). Split the sub-questions among readers, ~5 sources each.
 3. **Map** (role: `roles/synthesizer.md`). What sources agree on, where they disagree, what is open.
-4. **Ideas** (roles: `roles/ideator.md`, `roles/prover.md`, `roles/breaker.md`). Propose ideas
-   for the open questions. Except in quick depth, test the top ideas: a prover and a breaker
-   work independently, and a second prover replicates any passing test from the idea alone,
-   without seeing the first prover's code.
+4. **Explore**, one generation at a time:
+   1. *Diverge or evolve* (role: `roles/ideator.md`). Pick distinct **lenses**: fields or
+      angles that bear on the question from different directions (for a readout-cost
+      question: statistics, signal processing, numerical linear algebra, hardware). Give
+      each ideator one lens. Generation 1 diverges; later generations evolve the diverse top.
+   2. *Compare* (role: `roles/judge.md`). Judges, never the ideators themselves, work through
+      `rank.py pairs` until every idea has been compared about three times.
+   3. *Test* (roles: `roles/prover.md`, `roles/breaker.md`). Take the diverse top from
+      `rank.py top`: the best idea of each cluster, not the top few of one cluster. For each,
+      a prover and a breaker work independently, and a second prover replicates any passing
+      test from the idea alone, without seeing the first prover's code. Refuted ideas stay
+      in the record: the next generation learns from why they failed.
+   4. *Stop or continue.* Stop when the generation limit is reached, or when a generation
+      puts no new idea into the diverse top (`rank.py top` reports this per generation).
 5. **Check** (role: `roles/referee.md`). Referees who did not record the claims label them.
 6. **Report** (role: `roles/writer.md`). The writer drafts the answer; `report.py` re-checks
-   every label and builds the report around it.
+   every label and builds the report around it, including a frontier of the strongest
+   untested ideas.
+
+| Depth | Sources | Lenses | Generations | Ideas tested per generation |
+|---|---|---|---|---|
+| quick | ~10 | 3 | 1 | none: ideas stay untested |
+| standard | ~30 | 4 | 2 | top 3 of the diverse top |
+| deep | 50+ | 5–6 | up to 5 | top 5 of the diverse top |
 
 If you can start subagents, give each one the role file and its task.
 Use a fast model for readers, ideators, provers and breakers, and your strongest model for
-the synthesizer and referees. If you cannot, play the roles yourself, one at a time.
+the synthesizer, judges and referees. If you cannot, play the roles yourself, one at a time.
 
-Finish by telling the user the answer in two or three sentences with its labels, what was
-not checked, and the path to `report.md`.
+Finish by telling the user the answer in two or three sentences with its labels, the most
+promising ideas, what was not checked, and the path to `report.md`.
 
 ## Rules for every role
 

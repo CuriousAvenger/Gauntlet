@@ -11,7 +11,9 @@ def report(run, tmp_path, answer, *flags):
 def test_answer_rules(run, sources, tmp_path):
     cid = run("claim.py", stdin={"statement": "Shots fell 8.0-fold.",
                                       "quotes": [{"url": "https://a.example/paper", "quote": QUOTE}]})[1]["id"]
-    iid = run("claim.py", stdin={"statement": "Turbulent flows behave the same.", "settling_test": "simulate them"})[1]["id"]
+    iid = run("claim.py", stdin={"statement": "Turbulent flows behave the same.", "settling_test": "simulate them",
+                                 "prior_work": [{"url": "https://a.example/paper", "quote": QUOTE}],
+                                 "difference": "extends the result to turbulent flows"})[1]["id"]
     for answer, why in [(f"Shots fell [{cid}].", "no label"), (f"Turbulence too [{iid}].", "only tested ideas"),
                         ("Shots fell 8-fold.", "without citing"), ("See [C9].", "does not exist")]:
         code, out = report(run, tmp_path, answer)
@@ -19,10 +21,11 @@ def test_answer_rules(run, sources, tmp_path):
     run("label.py", cid, "reported")
     assert report(run, tmp_path, f"One study reports an 8-fold drop [{cid}].", "--high-stakes")[0] == 0
     text = (sources / "report.md").read_text()
-    assert f"[{cid} · Reported]" in text and "Would be settled by" in text and "not advice" in text
+    assert f"[{cid} · Reported]" in text and "## Frontier" in text and "Would be settled by" in text
+    assert "Closest prior work: S1" in text and "not advice" in text
 
 
-def test_report_rechecks_edited_tests(run, tmp_path):
+def test_report_rechecks_edited_tests(run, sources, tmp_path):
     iid = idea(run, tmp_path, replica=GOOD)
     assert run("label.py", iid, "tested")[0] == 0
     (tmp_path / f"runs/{iid}-T1.py").write_text(BROKEN)
