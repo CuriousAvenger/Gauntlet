@@ -26,7 +26,7 @@ AGENTS.md         the question (you write it) and how any agent should work here
   SKILL.md        the research loop, rules and field guide
   roles/          reader, synthesizer, ideator, prover, breaker, referee, writer
   scripts/        source.py, claim.py, run_test.py, label.py, report.py
-    lib/          the checks they share
+    common.py     the checks they share
     tests/        tests for the scripts
 sources/          exact copies of every source read
 runs/             test scripts and the log of every run
