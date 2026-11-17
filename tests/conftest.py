@@ -1,36 +1,35 @@
+import json
+import subprocess
+import sys
+from pathlib import Path
+
 import pytest
 
-from gauntlet.protocol import ToolError
-from gauntlet.tools import server
+SCRIPTS = Path(__file__).resolve().parent.parent / "skills" / "gauntlet" / "scripts"
+sys.path.insert(0, str(SCRIPTS))
 
-
-@pytest.fixture(autouse=True)
-def home(tmp_path, monkeypatch):
-    monkeypatch.setenv("GAUNTLET_HOME", str(tmp_path / "research"))
-    return tmp_path / "research"
-
-
-@pytest.fixture
-def call():
-    """Call a tool through the MCP server, as an agent would."""
-    def _call(name, **args):
-        res = server.handle({"jsonrpc": "2.0", "id": 1, "method": "tools/call",
-                             "params": {"name": name, "arguments": args}})["result"]
-        if res["isError"]:
-            raise ToolError(res["content"][0]["text"])
-        return res.get("structuredContent", res["content"][0]["text"])
-    return _call
-
-
-SOURCE = ("Using importance-weighted readout, the number of shots needed to reach precision 0.01 "
-          "fell by a factor of 8.0 relative to uniform sampling, at grid size 64.")
-PASSAGE = "the number of shots needed to reach precision 0.01 fell by a factor of 8.0 relative to uniform sampling"
+PAGE = ("Using importance-weighted readout, the number of shots needed to reach precision 0.01 "
+        "fell by a factor of 8.0 relative to uniform sampling, at grid size 64.")
+QUOTE = "the number of shots needed to reach precision 0.01 fell by a factor of 8.0 relative to uniform sampling"
 
 
 @pytest.fixture
-def project(call):
-    call("start_research", question="Does importance-weighted readout reduce shots?")
-    call("save_source", kind="preprint", url="https://ex.org/a", title="A", text=SOURCE)
-    call("save_source", kind="peer-reviewed", url="https://ex.org/b", title="B", text="Replication: " + SOURCE)
-    from gauntlet.project import Project
-    return Project.open()
+def run(tmp_path, monkeypatch):
+    """Run a Gauntlet script as an agent would; returns (exit code, parsed JSON)."""
+    monkeypatch.chdir(tmp_path)
+
+    def _run(script, *args, stdin=None):
+        proc = subprocess.run([sys.executable, str(SCRIPTS / script), *map(str, args)], cwd=tmp_path,
+                              input=json.dumps(stdin) if stdin is not None else None,
+                              capture_output=True, text=True, timeout=60)
+        return proc.returncode, json.loads(proc.stdout)
+    return _run
+
+
+@pytest.fixture
+def sources(run, tmp_path):
+    """Two saved sources, A and B, saying the same thing."""
+    (tmp_path / "page.txt").write_text(PAGE)
+    for url in ("https://a.example/paper", "https://b.example/replication"):
+        assert run("source.py", "p", url, "--text-file", "page.txt")[0] == 0
+    return tmp_path / "research" / "p"

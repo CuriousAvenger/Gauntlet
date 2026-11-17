@@ -1,75 +1,58 @@
 # Gauntlet
 
-A research harness for any agent that speaks MCP. Ask a research question and get a
-report where **every claim shows how it was checked**: a fact carries its quote, a new
-idea carries the test it passed or failed, or says it is untested.
+A research skill for AI agents. Ask a research question and get a report where **every
+claim shows how it was checked**: facts carry exact quotes from saved sources, new ideas
+carry the tests they passed or failed, or say they are untested.
 
-Design: [docs/design.md](docs/design.md).
+It is one folder in the open [Agent Skills](https://agentskills.io) format, so it works with
+any agent that loads skills and has a shell. It needs Python 3.10+ and nothing else.
 
-## Connect it
+## Install
 
-One MCP server over stdio. Needs `python3` 3.10+ and nothing else (`pypdf`, if present,
-adds PDF sources). Add it to your client:
+Copy `skills/gauntlet/` into the folder your agent loads skills from (see your agent's
+docs). If your agent does not support skills, add this line to your `AGENTS.md`:
 
-```json
-{
-  "mcpServers": {
-    "gauntlet": { "command": "python3", "args": ["/path/to/gauntlet/server.py"] }
-  }
-}
-```
+> For research questions, follow `skills/gauntlet/SKILL.md`.
 
-Then ask a research question. The server tells the model to start with
-`get_brief("orchestrator")`; clients that show MCP prompts also get a `research` prompt.
-If your client ignores server instructions, add to your agent instructions: *"For research
-questions, call the gauntlet get_brief tool with role orchestrator and follow it."*
+Then ask a research question. Projects are written to `research/<project>/` in the current
+directory; the report is `research/<project>/report.md`.
 
-Projects are written to `research/<question-slug>/` where the server runs (or
-`$GAUNTLET_HOME`); the report is `report.md` there, and `write_report` returns its text.
+## How it works
 
-## Agents decide, code verifies
+The agent does the reading, thinking and writing. Small scripts do the checks a model cannot
+reliably do for itself:
 
-The briefs (`gauntlet/briefs/`) carry the workflow and all judgement: what to read, what a
-passage means, which ideas are worth testing, whether a comparison is fair. The code does
-only what a model cannot be trusted to do for itself:
-
-- **Sources:** fetches each URL and stores its text and hash, so a quote is checked against
-  what the source says, not the model's memory of it.
-- **Quotes and numbers:** a label needs every passage found verbatim in the stored text and
-  every number in the claim traceable to a passage or a test log.
-- **Tests:** runs the model's test scripts itself, on its seeds and then on held-out seeds
-  it picks at random, and compares an independent replication's numbers.
-- **Labels:** refuses any label those checks don't support.
-- **Report:** re-audits every label (re-running changed test scripts) before writing, and
-  refuses an answer that cites unlabelled claims or untested ideas or states uncited numbers.
+| The agent… | Gauntlet… |
+|---|---|
+| reads a source (`source.py`) | fetches the page itself and keeps an exact copy |
+| records a claim with a quote (`claim.py`) | confirms the quote is word for word in that copy and every number traces to it |
+| tests an idea (`run_test.py`) | runs the code itself, on the agent's seeds and on held-out seeds it picks at random |
+| labels a claim (`label.py`) | refuses any label the evidence has not earned |
+| writes the answer (`report.py`) | re-checks every label, refuses an answer that overstates, and builds the report |
 
 | Label | Requires |
 |---|---|
-| Established | 2+ independent sources, quotes verbatim, numbers traceable; on high-stakes topics a systematic review, meta-analysis, guideline or official source |
-| Reported | 1 source, same checks |
-| Contested | Passages on both sides |
-| New idea: tested | Support test passed on development and held-out seeds; an independent replication within 10%; no counterexample broke it |
-| New idea: refuted | A run reported `pass: false` |
-| New idea: untested | The test that would settle it |
+| Established | Two or more independent sources, quoted word for word |
+| Reported | One source, quoted word for word |
+| Contested | Quotes on both sides |
+| New idea: tested | Passed on held-out seeds, and independently written code reproduces the result within 10% |
+| New idea: refuted | A run failed |
+| New idea: untested | States the test that would settle it |
 
-Test scripts take `--seed N` and print `GAUNTLET_RESULT {"pass": true, "headline": {"ratio": 8.1}}`.
+## Layout
 
-## What's in `gauntlet/`
-
-| File | Purpose |
-|---|---|
-| `protocol.py` | MCP over stdio (tools and prompts), no dependencies |
-| `tools.py` | The 13 tools agents call |
-| `briefs/`, `briefs.py` | Orchestrator and seven role briefs, served by `get_brief` |
-| `labels.py` | Quote and number checks, label requirements, re-audit |
-| `testing.py` | Runs test scripts on development and held-out seeds |
-| `sources.py` | Fetches pages (HTML, text, PDF) |
-| `project.py` | The per-question folder |
-| `report.py` | Builds the report |
-| `packs/` | Expert packs; `quantum-readout` carries the PhysicsC191A lessons |
+```
+skills/gauntlet/
+  SKILL.md        the research loop, rules and field guide
+  roles/          reader, synthesizer, ideator, prover, breaker, referee, writer
+  packs/          background for specialist fields (quantum-readout)
+  scripts/        source.py, claim.py, run_test.py, label.py, report.py
+    gauntlet/     the checks they share
+tests/
+```
 
 ## Development
 
 ```bash
-pip install pytest && pytest -q
+pip install pytest && pytest
 ```

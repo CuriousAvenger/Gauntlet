@@ -1,22 +1,31 @@
-import pytest
-from conftest import PASSAGE
+from test_ideas import BROKEN, GOOD, idea
 
-from gauntlet.protocol import ToolError
+from conftest import QUOTE
 
 
-def test_report(call, project):
-    cid = call("record_claim", statement="Shots fell 8.0-fold.",
-               evidence=[{"source_id": "S1", "passage": PASSAGE}])["claim_id"]
-    call("record_evidence_map", agree="", disagree="", gaps=["turbulence"])
-    iid = call("propose_idea", statement="Turbulent flows show the same reduction.", gap="G1",
-               settling_test="simulate turbulent flows")["idea_id"]
-    for answer, why in [(f"Shots fell 8-fold [{cid}].", "not earned a label"),
-                        (f"Turbulent flows behave the same [{iid}].", "only tested ideas"),
-                        ("Shots fell 8-fold in the study.", "without citing"),
-                        ("See [C9] for details here.", "does not exist")]:
-        with pytest.raises(ToolError, match=why):
-            call("write_report", answer=answer)
-    call("set_label", claim_id=cid, label="reported")
-    text = call("write_report", answer=f"One study reports shots fell 8-fold [{cid}].")["report"]
-    assert f"[{cid} · Reported]" in text and "Test that would settle it" in text
-    assert "## What was not checked" in text and "not advice" not in text
+def report(run, tmp_path, answer, *flags):
+    (tmp_path / "answer.md").write_text(answer)
+    return run("report.py", "p", "--question", "Does readout cut shots?", "--answer", "answer.md", *flags)
+
+
+def test_answer_rules(run, sources, tmp_path):
+    cid = run("claim.py", "p", stdin={"statement": "Shots fell 8.0-fold.",
+                                      "quotes": [{"url": "https://a.example/paper", "quote": QUOTE}]})[1]["id"]
+    iid = run("claim.py", "p", stdin={"statement": "Turbulent flows behave the same.", "settling_test": "simulate them"})[1]["id"]
+    for answer, why in [(f"Shots fell [{cid}].", "no label"), (f"Turbulence too [{iid}].", "only tested ideas"),
+                        ("Shots fell 8-fold.", "without citing"), ("See [C9].", "does not exist")]:
+        code, out = report(run, tmp_path, answer)
+        assert code == 1 and why in " ".join(out["fix"])
+    run("label.py", "p", cid, "reported")
+    assert report(run, tmp_path, f"One study reports an 8-fold drop [{cid}].", "--high-stakes")[0] == 0
+    text = (sources / "report.md").read_text()
+    assert f"[{cid} · Reported]" in text and "Would be settled by" in text and "not advice" in text
+
+
+def test_report_rechecks_edited_tests(run, tmp_path):
+    iid = idea(run, tmp_path, replica=GOOD)
+    assert run("label.py", "p", iid, "tested")[0] == 0
+    (tmp_path / f"research/p/runs/{iid}-T1.py").write_text(BROKEN)
+    report(run, tmp_path, "Nothing is cited here.", "--draft")
+    text = (tmp_path / "research/p/report.md").read_text()
+    assert "New idea: tested to New idea: refuted" in text
