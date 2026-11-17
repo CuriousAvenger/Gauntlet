@@ -1,5 +1,5 @@
 # Copy to gauntlet.toml in your project root to override defaults.
-# Model changes take effect for subagents after re-running scripts/build.py.
+# [models] sets the tier prices used for estimates; which model runs a role is chosen in your client.
 
 [models]               # which model fills each tier
 strong = "claude-opus-5-5"     # scope, synthesize, check (referee)

@@ -4,14 +4,14 @@ import subprocess
 import sys
 from pathlib import Path
 
-from gauntlet.mcp import tools as T
-from gauntlet.mcp.server import Server, validate
+from gauntlet import tools as T
+from gauntlet.protocol import Server, validate
 
 ROOT = Path(__file__).resolve().parent.parent
 
 
 def _session(messages, env=None):
-    proc = subprocess.run([sys.executable, str(ROOT / "runtime/mcp_server.py")],
+    proc = subprocess.run([sys.executable, str(ROOT / "server.py")], cwd="/",
                           input="".join(json.dumps(m) + "\n" for m in messages),
                           capture_output=True, text=True, env={**os.environ, **(env or {})}, timeout=60)
     return [json.loads(l) for l in proc.stdout.splitlines() if l.strip()]
@@ -28,9 +28,19 @@ def test_protocol_round_trip(tmp_path):
         {"jsonrpc": "2.0", "id": 4, "method": "tools/call", "params": {"name": "status", "arguments": {}}},
         {"jsonrpc": "2.0", "id": 5, "method": "tools/call", "params": {"name": "set_label", "arguments": {"label": "bogus"}}},
         {"jsonrpc": "2.0", "id": 6, "method": "nope"},
-    ], env={"GAUNTLET_HOME": str(tmp_path / "r")})
+        {"jsonrpc": "2.0", "id": 7, "method": "prompts/list"},
+        {"jsonrpc": "2.0", "id": 8, "method": "prompts/get",
+         "params": {"name": "research", "arguments": {"question": "Why did the Bronze Age collapse?"}}},
+        {"jsonrpc": "2.0", "id": 9, "method": "tools/call",
+         "params": {"name": "get_brief", "arguments": {"role": "reader", "agent": "reader-1", "task": "find 5 sources"}}},
+    ], env={"GAUNTLET_HOME": str(tmp_path / "r"), "GAUNTLET_STATE": str(tmp_path / "state")})
     by_id = {m["id"]: m for m in out}
-    assert len(out) == 6  # no reply to the notification
+    assert len(out) == 9  # 9 requests, no reply to the notification
+    assert by_id[7]["result"]["prompts"][0]["name"] == "research"
+    msg = by_id[8]["result"]["messages"][0]["content"]["text"]
+    assert "orchestrator" in msg and "Bronze Age" in msg
+    brief = by_id[9]["result"]["content"][0]["text"]
+    assert 'agent: "reader-1"' in brief and "find 5 sources" in brief and "Topic profile" in brief
     init = by_id[1]["result"]
     assert init["protocolVersion"] == "2025-03-26" and "Gauntlet" in init["instructions"]
     names = {t["name"] for t in by_id[2]["result"]["tools"]}
@@ -70,7 +80,8 @@ def test_handler_crash_becomes_error_result():
     assert r["result"]["isError"] and "kaboom" in r["result"]["content"][0]["text"]
 
 
-def test_tool_flow_feedback(tmp_path):
+def test_tool_flow_feedback(tmp_path, monkeypatch):
+    monkeypatch.setenv("GAUNTLET_STATE", str(tmp_path / "state"))
     T.start_research("Does sleep deprivation impair memory consolidation?", depth="quick")
     T.save_source(agent="reader-1", kind="peer-reviewed", url="https://ex.org/a", title="A",
                   text="Sleep deprivation after learning impairs the consolidation of declarative memories.")

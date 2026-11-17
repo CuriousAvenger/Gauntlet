@@ -1,14 +1,15 @@
-"""Gauntlet's agent-facing tools.
+"""Gauntlet's MCP tools: the only way agents read and write research records.
 
 Design notes (tools are written for models, not people):
-- Few, task-shaped tools. Each returns what the caller needs for its next
-  decision (ids, check failures, what to fix), never raw file dumps.
-- `project` is optional everywhere: it defaults to the active project, which
-  start_research sets. Subagents may pass it explicitly.
-- Every write is signed with `agent` so the harness can enforce separation of
-  duties (a claim's author cannot referee it; a replication must come from a
-  different agent with its own script).
+- Few, task-shaped tools whose results carry what the caller needs next (ids,
+  failures, what to fix), never raw file dumps.
+- Nothing needs filesystem access: briefs, profile, evidence map and test
+  scripts all travel through tools, so chat-only MCP clients work too.
+- `project` is optional everywhere and defaults to the active project.
+- Writes are signed with `agent` for separation of duties (an author cannot
+  referee its own claim; a replication needs another agent and its own code).
 - Errors are ToolErrors phrased as instructions.
+- Every call verifies, then re-seals, the project's records (integrity.py).
 """
 
 from __future__ import annotations
@@ -16,30 +17,30 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from .. import __version__, cost, labels, profiles, report, testing
-from ..checks import quote_check, provenance, wording
-from ..config import load_config
-from ..project import Project, ProjectError, projects_dir
-from ..sources import SOURCE_KINDS, FetchError, fetch
-from ..util import now_iso
-from .server import Server, ToolError
+from . import __version__, briefs, cost, integrity, labels, profiles, report, testing
+from .checks import provenance, quote_check, wording
+from .config import load_config
+from .project import Project, ProjectError, projects_dir
+from .protocol import Server, ToolError
+from .sources import SOURCE_KINDS, FetchError, fetch
+from .util import atomic_write, now_iso
 
-INSTRUCTIONS = """Gauntlet is a research harness: every claim in a report shows how it was checked.
-Rules the tools enforce, and you must follow:
-1. Never give a claim a stronger label than its evidence. Only set_label sets labels; it refuses unearned ones.
-2. Cite only sources saved with save_source, quoting passages word for word (search_sources shows exact lines).
-3. Test results come from run_test, which the harness executes itself; nobody's summary replaces a run.
-4. Never soften a claim or change a test to make it pass. A refuted idea is a result.
-5. Say "not found in the sources read", never new/novel/first/proved.
-6. On medical, legal or financial topics the report is research, not advice.
-Start with start_research. Use the gauntlet-* subagents for reading, testing and refereeing."""
+INSTRUCTIONS = """Gauntlet is a research harness: answers where every claim shows how it was checked.
+When the user asks a research question (what the evidence says, whether something is true, a literature
+review, comparing findings), call get_brief with role "orchestrator" and follow it.
+The tools enforce the trust rules: labels are refused unless earned, sources are fetched and stored by
+the harness, tests are executed by the harness on held-out seeds, and the report cannot overstate."""
 
 server = Server("gauntlet", __version__, INSTRUCTIONS)
 
 STAGES = ("scope", "survey", "synthesize", "explore", "check", "report")
+SOURCE_CAP_FACTOR = 2      # save_source refuses beyond 2x the depth's source target
+TESTS_PER_IDEA_CAP = 12
+UNGATED_ROLES = ("orchestrator", "writer")  # may always run, so a report can be finished
+
 _P = {"project": {"type": "string", "description": "Project slug. Defaults to the active project."}}
 _AGENT = {"agent": {"type": "string", "minLength": 1,
-                    "description": "Your agent name, e.g. reader-2. Must be unique per agent; it signs your work."}}
+                    "description": "Your agent name from your brief, e.g. reader-2. It signs your work."}}
 _EVIDENCE = {
     "type": "array", "minItems": 1,
     "items": {"type": "object", "required": ["source_id", "passage"], "additionalProperties": False,
@@ -60,15 +61,48 @@ _COMPARISON = {
 }
 
 
-# ---- helpers ------------------------------------------------------------------------
+# ---- per-call integrity ---------------------------------------------------------------
+
+_touched: dict[str, Project] = {}
+
 
 def _open(project: str | None) -> Project:
+    """Open a project and, once per tool call, verify its records were not edited
+    outside Gauntlet. An out-of-band edit is recorded, every claim is re-checked,
+    and the call is refused so the agent sees what happened."""
     try:
         p = Project.open(projects_dir(), project, load_config())
     except ProjectError as e:
         raise ToolError(f"{e}. Call start_research first, or pass `project`.") from e
+    key = str(p.root)
+    if key not in _touched:
+        _touched[key] = p
+        changed = integrity.verify(p)
+        if changed:
+            ev = integrity.record_tampering(p, changed)
+            raise ToolError(
+                "Evidence records were edited outside Gauntlet: " + ", ".join(changed[:8])
+                + f". The edit is recorded in the report and every claim was re-checked "
+                f"({len(ev['relabelled'])} label(s) changed). Change records only through these tools, "
+                "then retry your call.")
     return p
 
+
+def _around(name: str, call):
+    _touched.clear()
+    try:
+        return call()
+    finally:
+        for p in list(_touched.values()):
+            if p.state_path.exists():
+                integrity.seal(p)
+        _touched.clear()
+
+
+server.around = _around
+
+
+# ---- helpers ------------------------------------------------------------------------
 
 def _claim(p: Project, cid: str) -> dict[str, Any]:
     try:
@@ -98,11 +132,11 @@ def _check_evidence(p: Project, evidence: list[dict]) -> list[dict]:
 
 
 def _quick_feedback(p: Project, claim: dict) -> list[str]:
-    """Checks an author can fix immediately: quotes and number provenance."""
+    """Problems an author can fix immediately: misquotes and unlinked numbers."""
     notes = []
     q = quote_check.check(p, claim)
     if not q.passed:
-        notes += [f"quote {d}" for d in q.details if "found" != d.split(": ", 1)[-1]]
+        notes += [f"quote {d}" for d in q.details if d.split(": ", 1)[-1] != "found"]
     pr = provenance.check(p, claim)
     if not pr.passed:
         notes += [d for d in pr.details if "appears in no" in d]
@@ -123,13 +157,55 @@ def _compact(c: dict) -> dict:
     return out
 
 
+# ---- briefs ---------------------------------------------------------------------------
+
+@server.tool(
+    "get_brief",
+    """Get the self-contained instructions for a Gauntlet role. Call it with role "orchestrator" when the user asks
+a research question, then follow that brief. For each piece of delegated work, get the role's brief with the
+agent name and task filled in, and give it to a subagent (or follow it yourself if you cannot start subagents).
+Roles: orchestrator, reader, synthesizer, ideator, prover, breaker, referee, writer. Research roles are refused
+once the project's budget is spent; the writer is always available to finish the report.""",
+    {**_P, "role": {"type": "string", "enum": list(briefs.ROLES)},
+     "agent": {"type": "string", "description": "Agent name to assign, e.g. reader-3 (unique per instance)"},
+     "task": {"type": "string", "description": "The specific task: sub-questions, claim ids, idea id, test id..."}},
+    ["role"],
+)
+def get_brief(role: str, agent: str | None = None, task: str | None = None, project: str | None = None) -> str:
+    p = None
+    try:
+        p = _open(project)
+    except ToolError:
+        if role != "orchestrator" or project:
+            raise
+    if p is not None and role not in UNGATED_ROLES:
+        sp = cost.spend(p)
+        if sp["total_usd"] >= sp["budget_usd"]:
+            raise ToolError(f"Budget spent (${sp['total_usd']:.2f} of ${sp['budget_usd']:.2f}): no new research "
+                            "work. Go to the Report stage with what you have and tell the user.")
+        s = p.state()
+        s.setdefault("dispatches", []).append({"role": role, "agent": agent, "at": now_iso()})
+        p.save_state(s)
+    return briefs.compose(role, p, agent, task)
+
+
+@server.prompt(
+    "research",
+    "Research a question with Gauntlet: a sourced answer where every claim shows how it was checked.",
+    [{"name": "question", "description": "The research question", "required": True},
+     {"name": "depth", "description": "quick | standard | deep", "required": False}],
+)
+def research_prompt(question: str, depth: str = "standard") -> str:
+    return (briefs.compose("orchestrator") + f"\n## The user's request\n\nQuestion: {question}\nDepth: {depth}\n")
+
+
 # ---- lifecycle ------------------------------------------------------------------------
 
 @server.tool(
     "start_research",
     """Create a research project for a question (or start a follow-up round on an existing one) and make it active.
 Returns the slug, the drafted topic profile (field, reader level, high-stakes flag, test mode), depth targets and a cost
-estimate to show the user before spending anything.""",
+estimate to show the user before spending anything. Get the orchestrator brief (get_brief) first if you have not.""",
     {"question": {"type": "string", "minLength": 3},
      "depth": {"type": "string", "enum": ["quick", "standard", "deep"],
                "description": "quick ~10 sources, ideas untested; standard ~30 sources, top ideas tested once; deep 50+ sources, repeated cycles"},
@@ -156,30 +232,61 @@ def start_research(question: str, depth: str = "standard", pack: str | None = No
                            reader_level=reader_level, config=cfg)
     except (ProjectError, ValueError) as e:
         raise ToolError(str(e)) from e
+    _touched[str(p.root)] = p
     prof = p.profile()
     est = cost.estimate(cfg, depth)
     return {
         "project": p.slug,
         "folder": str(p.root),
         "profile": {k: prof.get(k) for k in ("field", "reader_level", "high_stakes", "test_mode")},
-        "profile_file": str(p.profile_path),
         "targets": p.state()["targets"],
         "budget_usd": p.state()["budget_usd"],
         "estimate_usd": est["total_usd"],
         "estimate_by_stage": {r["stage"]: round(r["usd"] or 0, 2) for r in est["rows"]},
-        "pack_folder": str(p.pack_dir) if pack else None,
-        "next": "Show the user the profile and estimate; fix profile.md if the field or level is wrong; then plan sub-questions and set_stage('survey').",
+        "pack": pack,
+        "next": "Tell the user the profile and estimate; fix the profile with update_profile if wrong; plan "
+                "sub-questions; set_stage('survey').",
     }
+
+
+@server.tool(
+    "update_profile",
+    """Correct the topic profile: field family (re-drafts where to look and how ideas are tested), reader level, or
+free-text notes the user gave (appended under 'Notes from the user'). Every brief issued afterwards uses it.""",
+    {**_P, "field": {"type": "string", "enum": list(profiles.FIELDS)},
+     "reader_level": {"type": "string", "enum": ["general", "student", "expert"]},
+     "notes": {"type": "string"}},
+)
+def update_profile(field: str | None = None, reader_level: str | None = None, notes: str | None = None,
+                   project: str | None = None) -> dict:
+    p = _open(project)
+    cur = p.profile()
+    text = p.profile_path.read_text()
+    if field or reader_level:
+        text = profiles.draft_profile(p.state()["question"], field=field or cur.get("field"),
+                                      pack=p.state().get("pack"), reader_level=reader_level or cur.get("reader_level"))
+        old_notes = p.profile_path.read_text().partition("\n## Notes from the user\n")[2]
+        if old_notes:
+            text += "\n## Notes from the user\n" + old_notes
+    if notes:
+        if "\n## Notes from the user\n" not in text:
+            text += "\n## Notes from the user\n"
+        text = text.rstrip() + f"\n- {notes.strip()}\n"
+    atomic_write(p.profile_path, text)
+    new = p.profile()
+    return {k: new.get(k) for k in ("field", "reader_level", "high_stakes", "test_mode")}
 
 
 @server.tool(
     "status",
     """Where the project stands: stage, sources read vs target, claims by label, open gaps, spend vs budget, whether a
-stop condition holds, and the suggested next step. Set include_claims for a compact claim list.""",
-    {**_P, "include_claims": {"type": "boolean"}},
+stop condition holds. Options add the compact claim list, the evidence map, or the topic profile.""",
+    {**_P, "include_claims": {"type": "boolean"}, "include_evidence_map": {"type": "boolean"},
+     "include_profile": {"type": "boolean"}},
     read_only=True,
 )
-def status(project: str | None = None, include_claims: bool = False) -> dict:
+def status(project: str | None = None, include_claims: bool = False, include_evidence_map: bool = False,
+           include_profile: bool = False) -> dict:
     p = _open(project)
     s = p.state()
     claims = p.claims()
@@ -198,9 +305,14 @@ def status(project: str | None = None, include_claims: bool = False) -> dict:
         "cycles_done": sum(1 for c in s["cycles"] if c.get("ended")), "max_cycles": s["targets"]["max_cycles"],
         "spend_usd": round(sp["total_usd"], 2), "budget_usd": sp["budget_usd"],
         "stop": stop, "stop_reason": why, "report_written": p.report_path.exists(),
+        "integrity_events": len(s.get("integrity_events", [])),
     }
     if include_claims:
         out["claims"] = [_compact(c) for c in claims]
+    if include_evidence_map and p.evidence_map_path.exists():
+        out["evidence_map"] = p.evidence_map_path.read_text()
+    if include_profile:
+        out["profile"] = p.profile_path.read_text()
     return out
 
 
@@ -208,7 +320,7 @@ def status(project: str | None = None, include_claims: bool = False) -> dict:
     "set_stage",
     """Record the loop stage: scope, survey, synthesize, explore, check, report. Entering explore opens a cycle; leaving
 check (to explore or report) closes it and returns whether a stop condition holds (cycles used, budget spent, or
-repeated cycles with no new evidence). Usage is attributed to the current stage.""",
+repeated cycles with no new evidence).""",
     {**_P, "stage": {"type": "string", "enum": list(STAGES)}},
     ["stage"],
 )
@@ -247,6 +359,10 @@ def save_source(agent: str, kind: str, url: str | None = None, title: str | None
     p = _open(project)
     if not url and not text and not unread_reason:
         raise ToolError("give `url` (preferred), or `text`, or `unread_reason`")
+    cap = p.state()["targets"]["sources"] * SOURCE_CAP_FACTOR
+    if len(p.sources()) >= cap:
+        raise ToolError(f"source limit for this depth reached ({cap}); work with the sources saved, "
+                        "or ask the user to rerun at a deeper depth")
     captured = "agent-text" if text else "gauntlet-fetch"
     if url and not text and not unread_reason:
         try:
@@ -261,16 +377,16 @@ def save_source(agent: str, kind: str, url: str | None = None, title: str | None
         raise ToolError(str(e)) from e
     if row["status"] != "read":
         return {"source_id": row["id"], "status": "unread", "reason": row["unread_reason"],
-                "hint": "Not citable. Look for an open copy (preprint, author page) and save that URL."}
-    head = (text or "")[:400].strip()
+                "hint": "Not citable. Look for an open copy (preprint, author page) and save that URL, "
+                        "or pass the page's verbatim text if you can read it."}
     return {"source_id": row["id"], "status": "read", "chars": len(text or ""), "title": row["title"],
-            "captured_by": captured, "opening": head}
+            "captured_by": captured, "opening": (text or "")[:400].strip()}
 
 
 @server.tool(
     "search_sources",
     """Find exact lines in saved sources (case-insensitive regex). Use it to copy passages word for word before
-record_claim, and to check whether an idea already appears in the sources read.""",
+record_claim, to read a passage in context, and to check whether an idea already appears in the sources read.""",
     {**_P, "pattern": {"type": "string", "minLength": 2},
      "source_id": {"type": "string", "description": "Limit to one source; default all"},
      "context": {"type": "integer", "description": "Lines of context around each hit (default 1)"},
@@ -308,7 +424,7 @@ def search_sources(pattern: str, source_id: str | None = None, context: int = 1,
     "record_claim",
     """Record one claim from sources with its quoted evidence. The statement must say no more than the passages (keep
 their hedges and scope); every number in it must appear in a passage. Returns the claim id plus any quote or number
-problems to fix now. Claims start as pending; only the referee labels them. If the same claim already exists,
+problems to fix now. Claims start as pending; only a referee labels them. If the same claim already exists,
 use add_evidence instead.""",
     {**_P, **_AGENT, "statement": {"type": "string", "minLength": 10}, "evidence": _EVIDENCE,
      "comparisons": _COMPARISON},
@@ -333,8 +449,8 @@ def record_claim(agent: str, statement: str, evidence: list[dict], comparisons: 
 
 @server.tool(
     "add_evidence",
-    """Attach more quoted passages (or a comparison record) to an existing claim: a second independent source that agrees,
-or a passage that contradicts it (side='against', which makes it a candidate for 'contested').""",
+    """Attach more quoted passages (or a comparison record) to an existing claim or idea: a second independent source
+that agrees, or a passage that contradicts it (side='against', which makes it a candidate for 'contested').""",
     {**_P, **_AGENT, "claim_id": {"type": "string"}, "evidence": _EVIDENCE, "comparisons": _COMPARISON},
     ["agent", "claim_id"],
 )
@@ -350,7 +466,7 @@ def add_evidence(agent: str, claim_id: str, evidence: list[dict] | None = None, 
     c["history"].append({"at": now_iso(), "event": "evidence", "by": agent})
     p.put_claim(c)
     out = {"claim_id": claim_id, "evidence_indexes": list(range(start, len(c["sources"])))}
-    problems = _quick_feedback(p, c)
+    problems = _quick_feedback(p, c) if c["sources"] else []
     if problems:
         out["fix_now"] = problems
     return out
@@ -371,7 +487,7 @@ def list_claims(label: str | None = None, kind: str | None = None, ids: list[str
     rows = [c for c in p.claims() if (not label or c["label"] == label) and (not kind or c["kind"] == kind)
             and (not ids or c["id"] in ids)]
     if full:
-        return {"claims": [{k: v for k, v in c.items() if k not in ("history",)} for c in rows]}
+        return {"claims": [{k: v for k, v in c.items() if k != "history"} for c in rows]}
     return {"claims": [_compact(c) for c in rows]}
 
 
@@ -387,7 +503,7 @@ same text keeps its id; gaps not re-sent are closed.""",
 def record_evidence_map(agent: str, agree: str, disagree: str, gaps: list[str], project: str | None = None) -> dict:
     p = _open(project)
     _lint(agree + "\n" + disagree + "\n" + "\n".join(gaps))
-    return {"open_gaps": p.set_evidence_map(agree, disagree, gaps, agent), "file": str(p.evidence_map_path)}
+    return {"open_gaps": p.set_evidence_map(agree, disagree, gaps, agent)}
 
 
 # ---- ideas and tests ------------------------------------------------------------------------
@@ -416,24 +532,39 @@ def propose_idea(agent: str, statement: str, gap: str, settling_test: str, ratio
 
 @server.tool(
     "run_test",
-    """Run a test script for an idea. The harness executes it: first on your development seeds, then (for support and
-replication) on held-out seeds it draws at random, and keeps the logs. The script must take `--seed N` and print
-`GAUNTLET_RESULT {"pass": true|false, "headline": {"name": number}}`. Write it under runs/<agent>/ in the project
-folder. Roles: support (prover's test), counterexample (breaker's attack: pass=false means the idea broke),
-replication (a second prover's independent script for test `replicates`). Re-running an edited script replaces
-nothing: each call adds a new test record.""",
+    """Run a Python test script for an idea. Pass the source as `code` (the harness saves it under runs/<agent>/), or
+`script`, a path to a file you already wrote inside the project folder. The harness executes it: first on your
+development seeds, then (for support and replication) on held-out seeds it draws at random, and keeps every log.
+The script must accept `--seed N` and print `GAUNTLET_RESULT {"pass": true|false, "headline": {"name": number}}`.
+Roles: support (prover's test), counterexample (breaker's attack: pass=false means the idea broke), replication
+(a second prover's independent script for test `replicates`). Each call adds a new test record.""",
     {**_P, **_AGENT, "idea_id": {"type": "string"},
-     "script": {"type": "string", "description": "Path relative to the project folder, e.g. runs/prover-1/test.py"},
      "role": {"type": "string", "enum": list(testing.ROLES)},
+     "code": {"type": "string", "description": "Python source of the test script"},
+     "name": {"type": "string", "description": "File name for `code`, e.g. heldout_test.py (default test.py)"},
+     "script": {"type": "string", "description": "Instead of code: path relative to the project folder"},
      "dev_seeds": {"type": "array", "items": {"type": "integer"}, "description": "Seeds you used while writing it (default [0])"},
      "args": {"type": "array", "items": {"type": "string"}, "description": "Extra CLI args before --seed"},
      "replicates": {"type": "string", "description": "For role=replication: the support test id, e.g. T1"}},
-    ["agent", "idea_id", "script", "role"],
+    ["agent", "idea_id", "role"],
 )
-def run_test(agent: str, idea_id: str, script: str, role: str, dev_seeds: list[int] | None = None,
-             args: list[str] | None = None, replicates: str | None = None, project: str | None = None) -> dict:
+def run_test(agent: str, idea_id: str, role: str, code: str | None = None, name: str | None = None,
+             script: str | None = None, dev_seeds: list[int] | None = None, args: list[str] | None = None,
+             replicates: str | None = None, project: str | None = None) -> dict:
     p = _open(project)
     c = _claim(p, idea_id)
+    if bool(code) == bool(script):
+        raise ToolError("give exactly one of `code` (script source) or `script` (path)")
+    if len(c.get("tests", [])) >= TESTS_PER_IDEA_CAP:
+        raise ToolError(f"{idea_id} already has {TESTS_PER_IDEA_CAP} tests; decide with what has been run")
+    if code:
+        safe_agent = re.sub(r"[^A-Za-z0-9_.-]", "_", agent)
+        fname = re.sub(r"[^A-Za-z0-9_.-]", "_", name or "test.py")
+        if not fname.endswith(".py"):
+            fname += ".py"
+        rel = f"runs/{safe_agent}/{idea_id}-{fname}"
+        atomic_write(p.root / rel, code)
+        script = rel
     try:
         t = testing.new_test(p, c, agent, script, role, dev_seeds or [0], args, replicates)
     except testing.TestError as e:
@@ -444,8 +575,10 @@ def run_test(agent: str, idea_id: str, script: str, role: str, dev_seeds: list[i
     out = testing.summary(t)
     rs = testing.runs(t)
     out["all_passed"] = all(r["pass"] for r in rs)
-    if any(r["error"] for r in rs):
-        out["hint"] = f"Some runs produced no result; read the logs under runs/_harness/{idea_id}/"
+    errors = [r for r in rs if r["error"]]
+    if errors:
+        log = (p.root / errors[0]["log"]).read_text(errors="replace")
+        out["first_error_log_tail"] = log[-1500:]
     return out
 
 
@@ -475,7 +608,6 @@ def judge_evidence(agent: str, claim_id: str, verdicts: list[dict], project: str
             raise ToolError(f"{claim_id} has evidence indexes 0..{len(c['sources']) - 1}")
         c["referee"].append({"source_index": v["index"], "verdict": v["verdict"], "by": agent,
                              "note": v.get("note", ""), "at": now_iso()})
-    p.put_claim(c)
     _, reqs = labels.evaluate(p, c)
     p.put_claim(c)
     return {"claim_id": claim_id, "labels_earned": [k for k, u in reqs.items() if not u]}
@@ -537,7 +669,8 @@ def audit(project: str | None = None) -> dict:
     """Save the plain-language answer and assemble report.md. The harness adds findings by label, new ideas, what was
 not checked and the expert appendix from the claim records. Cite claims as [C3] or [C3, C7]; it shows each label
 beside the citation. Refused if the answer cites a pending claim or an idea that is not tested, states a number in
-a paragraph without a citation, or uses banned wording; fix and call again. draft=true writes it anyway, marked DRAFT.""",
+a paragraph without a citation, or uses banned wording; fix and call again. draft=true writes it anyway, marked
+DRAFT. Returns the report text so you can show it even without file access.""",
     {**_P, **_AGENT, "answer": {"type": "string", "minLength": 20}, "draft": {"type": "boolean"}},
     ["agent", "answer"],
 )
@@ -546,15 +679,16 @@ def write_report(agent: str, answer: str, draft: bool = False, project: str | No
     ok, problems = report.write(p, answer=answer, draft=draft)
     if not ok:
         raise ToolError("Report not written. Fix the answer:\n- " + "\n- ".join(problems))
-    return {"report": str(p.report_path), "draft": bool(problems), "problems": problems}
+    return {"report_path": str(p.report_path), "draft": bool(problems), "problems": problems,
+            "report": p.report_path.read_text()}
 
 
 @server.tool(
     "log_usage",
-    """Record token usage for a finished subagent. Only needed in runners that do not capture usage automatically
-(Claude Code does, through Gauntlet's hooks).""",
+    """Record a finished agent's token usage against the project's budget. Call it after each subagent if your
+environment reports token counts; get_brief refuses new research work once the budget is spent.""",
     {**_P, **_AGENT, "input_tokens": {"type": "integer"}, "output_tokens": {"type": "integer"},
-     "model": {"type": "string"}},
+     "model": {"type": "string", "description": "Model id, for pricing (default: the role's configured tier)"}},
     ["agent", "input_tokens", "output_tokens"],
 )
 def log_usage(agent: str, input_tokens: int, output_tokens: int, model: str | None = None,
@@ -567,5 +701,5 @@ def log_usage(agent: str, input_tokens: int, output_tokens: int, model: str | No
 
 
 def serve() -> None:
-    """Console entry point (`gauntlet-mcp`) for runners that launch an installed package."""
+    """Run the server on stdio (console entry point `gauntlet-mcp`)."""
     server.serve()

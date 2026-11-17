@@ -82,6 +82,10 @@ def build(project, draft: bool = False) -> tuple[str, list[str]]:
         L.append("> **DRAFT — failed report checks.** See the list at the end. Do not share.\n")
     if profile.get("high_stakes"):
         L.append(f"> {NOT_ADVICE}\n")
+    events = state.get("integrity_events", [])
+    if events:
+        L.append(f"> **Integrity:** evidence records were edited outside Gauntlet {len(events)} time(s) "
+                 f"(first {events[0]['at'][:16]}). Every claim was re-checked after each edit; see the appendix.\n")
     L.append("**How to read this report.** Every claim carries a label that shows what evidence stands "
              "behind it. Nothing is shown as more certain than its evidence.\n")
     L.append("| Label | Meaning |\n|---|---|")
@@ -214,6 +218,9 @@ def appendix(project, claims, state) -> list[str]:
     out.append(f"- Cycles: {len([c for c in state['cycles'] if c.get('ended')])}; rounds: {len(state['rounds'])}")
     overturned = sum(1 for c in claims for h in c.get("history", []) if h.get("event") in ("downgrade", "overturned"))
     out.append(f"- Labels later overturned: {overturned}")
+    for ev in state.get("integrity_events", []):
+        out.append(f"- Integrity event {ev['at'][:16]}: edited outside Gauntlet: {', '.join(ev['files'][:8])}; "
+                   f"{len(ev.get('relabelled', []))} label(s) changed on re-check")
     out.append(f"- Models: " + ", ".join(f"{k}={v}" for k, v in state.get("models", {}).items()))
     return out
 

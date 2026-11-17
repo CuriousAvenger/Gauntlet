@@ -171,7 +171,7 @@ def strongest_allowed(claim: dict[str, Any], reqs: dict[str, list[str]]) -> str:
     return PENDING
 
 
-def audit(project, rerun_stale: bool = True, by: str = "audit") -> list[dict[str, Any]]:
+def audit(project, rerun_stale: bool = True, by: str = "audit", rerun_all: bool = False) -> list[dict[str, Any]]:
     """Re-check every labelled claim (the notebook re-audit).
 
     Tests whose script changed since it ran are re-run first (with fresh
@@ -184,7 +184,7 @@ def audit(project, rerun_stale: bool = True, by: str = "audit") -> list[dict[str
     for claim in claims:
         if rerun_stale:
             for t in claim.get("tests", []):
-                if testing.is_stale(project, t) and (project.root / t["script"]).is_file():
+                if (rerun_all or testing.is_stale(project, t)) and (project.root / t["script"]).is_file():
                     testing.execute(project, claim, t)
                     claim["history"].append({"at": now_iso(), "event": "rerun", "test": t["id"], "by": by})
         results, reqs = evaluate(project, claim)

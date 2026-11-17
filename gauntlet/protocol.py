@@ -1,9 +1,9 @@
-"""A dependency-free MCP server (stdio transport, tools capability).
+"""A dependency-free MCP server (stdio transport; tools and prompts).
 
-Implements the subset of the Model Context Protocol a tool server needs:
-``initialize``, ``ping``, ``tools/list`` and ``tools/call`` over newline-delimited
-JSON-RPC 2.0. Keeping it in the standard library means the plugin runs with any
-``python3`` and nothing to install.
+Implements the subset of the Model Context Protocol Gauntlet needs:
+``initialize``, ``ping``, ``tools/list``, ``tools/call``, ``prompts/list`` and
+``prompts/get`` over newline-delimited JSON-RPC 2.0. Standard library only, so any
+MCP client can launch it with a plain ``python3`` and nothing to install.
 
 Tools are registered with :func:`tool`. Arguments are validated against the
 tool's JSON Schema before the handler runs; a :class:`ToolError` becomes an
@@ -39,10 +39,27 @@ class Tool:
         return out
 
 
+@dataclass
+class Prompt:
+    name: str
+    description: str
+    arguments: list[dict[str, Any]]
+    fn: Callable[..., str]
+
+
 class Server:
     def __init__(self, name: str, version: str, instructions: str = ""):
         self.name, self.version, self.instructions = name, version, instructions
         self.tools: dict[str, Tool] = {}
+        self.prompts: dict[str, Prompt] = {}
+        # around(tool_name, call) -> result: wraps every tool call (used for integrity checks)
+        self.around: Callable[[str, Callable[[], Any]], Any] = lambda name, call: call()
+
+    def prompt(self, name: str, description: str, arguments: list[dict[str, Any]] = ()):
+        def deco(fn):
+            self.prompts[name] = Prompt(name, description.strip(), list(arguments), fn)
+            return fn
+        return deco
 
     def tool(self, name: str, description: str, properties: dict[str, Any], required: list[str] | tuple = (),
              read_only: bool = False):
@@ -69,6 +86,11 @@ class Server:
                 result = {"tools": [t.spec() for t in self.tools.values()]}
             elif method == "tools/call":
                 result = self._call(msg.get("params") or {})
+            elif method == "prompts/list":
+                result = {"prompts": [{"name": p.name, "description": p.description, "arguments": p.arguments}
+                                      for p in self.prompts.values()]}
+            elif method == "prompts/get":
+                result = self._get_prompt(msg.get("params") or {})
             else:
                 return _error(mid, -32601, f"method not found: {method}")
         except _RpcError as e:
@@ -80,7 +102,7 @@ class Server:
         version = requested if requested in SUPPORTED_VERSIONS else SUPPORTED_VERSIONS[0]
         out = {
             "protocolVersion": version,
-            "capabilities": {"tools": {"listChanged": False}},
+            "capabilities": {"tools": {"listChanged": False}, "prompts": {"listChanged": False}},
             "serverInfo": {"name": self.name, "version": self.version},
         }
         if self.instructions:
@@ -97,7 +119,7 @@ class Server:
         if problems:
             return _text_result("Invalid arguments:\n- " + "\n- ".join(problems), error=True)
         try:
-            value = tool.fn(**args)
+            value = self.around(name, lambda: tool.fn(**args))
         except ToolError as e:
             return _text_result(str(e), error=True)
         except Exception as e:  # never kill the server on a handler bug
@@ -108,6 +130,18 @@ class Server:
         return {"content": [{"type": "text", "text": json.dumps(value, ensure_ascii=False, indent=1)}],
                 "structuredContent": value if isinstance(value, dict) else {"result": value},
                 "isError": False}
+
+    def _get_prompt(self, params: dict[str, Any]) -> dict[str, Any]:
+        p = self.prompts.get(params.get("name"))
+        if p is None:
+            raise _RpcError(-32602, f"unknown prompt: {params.get('name')}")
+        args = params.get("arguments") or {}
+        missing = [a["name"] for a in p.arguments if a.get("required") and a["name"] not in args]
+        if missing:
+            raise _RpcError(-32602, f"missing prompt arguments: {missing}")
+        text = p.fn(**args)
+        return {"description": p.description,
+                "messages": [{"role": "user", "content": {"type": "text", "text": text}}]}
 
     def serve(self, stdin=None, stdout=None) -> None:
         stdin = stdin or sys.stdin

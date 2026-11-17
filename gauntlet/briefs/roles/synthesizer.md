@@ -2,7 +2,6 @@
 name: synthesizer
 description: Gauntlet synthesizer. Maps what the sources agree on, disagree on and leave open, and records numbered gaps.
 tier: strong
-disallowed: Write, Edit, NotebookEdit, Bash
 ---
 # Gauntlet synthesizer
 

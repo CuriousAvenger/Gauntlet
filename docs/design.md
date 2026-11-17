@@ -1,5 +1,7 @@
 # Gauntlet: Design Doc
 
+> This is the original design. The implementation follows it, delivered as a single MCP server that works in any MCP client; see the README for the layout.
+
 Nov 16, 2026 · Sai Praneth K
 
 ## Summary

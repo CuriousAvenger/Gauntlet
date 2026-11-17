@@ -152,8 +152,8 @@ def _merge(cfg: Config, data: dict[str, Any]) -> None:
 
 
 def workspace() -> Path:
-    """The user's project root: $CLAUDE_PROJECT_DIR when run by Claude Code, else cwd."""
-    return Path(os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd())
+    """The directory the server was started in (the user's workspace)."""
+    return Path(os.getcwd())
 
 
 def research_home() -> Path:
