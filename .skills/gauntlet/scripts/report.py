@@ -8,15 +8,28 @@ The title is the question in AGENTS.md (or pass --question). Cite claims in the 
 tested, or states a number without citing a claim. --draft writes it anyway, marked as a
 draft. --high-stakes adds a not-advice notice.
 """
+from __future__ import annotations
+
 import argparse
 import re
 
-from common import NAMES, ROOT, claims, fail, finish, question, reaudit, sources, write_file
+from claim import claims
+from label import NAMES, reaudit
+from source import ROOT, fail, finish, sources, write_file
 
 CITE = re.compile(r"\[((?:[CI]\d+)(?:\s*,\s*[CI]\d+)*)\]")
 MEANINGS = {"established": "Independent sources agree", "reported": "One source says so",
             "contested": "Sources disagree", "tested": "Proposed here, passed a test",
             "refuted": "Proposed here, failed a test", "untested": "Proposed here, not tested"}
+
+
+def question() -> str:
+    """The first line under '## Question' in AGENTS.md, unless it is still the placeholder."""
+    path = ROOT / "AGENTS.md"
+    match = re.search(r"^## Question\s*$(.*?)(?=^## |\Z)", path.read_text(), re.M | re.S) if path.exists() else None
+    text = re.sub(r"<!--.*?-->", "", match.group(1), flags=re.S) if match else ""
+    line = next((l.strip() for l in text.splitlines() if l.strip()), "")
+    return "" if line == "Write your research question here." else line
 
 
 def answer_problems(answer, by_id):
@@ -91,21 +104,26 @@ def render(title, answer, rows, changes, high_stakes, problems):
     return "\n".join(out) + "\n"
 
 
-p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-p.add_argument("--answer", required=True)
-p.add_argument("--question")
-p.add_argument("--high-stakes", action="store_true")
-p.add_argument("--draft", action="store_true")
-a = p.parse_args()
+def main() -> None:
+    p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    p.add_argument("--answer", required=True)
+    p.add_argument("--question")
+    p.add_argument("--high-stakes", action="store_true")
+    p.add_argument("--draft", action="store_true")
+    a = p.parse_args()
 
-title = a.question or question()
-if not title:
-    fail("write the question under '## Question' in AGENTS.md (or pass --question)")
-answer = open(a.answer, encoding="utf-8").read()
-changes = reaudit()
-rows = claims()
-problems = answer_problems(answer, {c["id"]: c for c in rows})
-if problems and not a.draft:
-    finish({"refused": "report not written", "fix": problems}, 1)
-write_file(ROOT / "report.md", render(title, answer, rows, changes, a.high_stakes, problems))
-finish({"report": str(ROOT / "report.md"), **({"draft_problems": problems} if problems else {})})
+    title = a.question or question()
+    if not title:
+        fail("write the question under '## Question' in AGENTS.md (or pass --question)")
+    answer = open(a.answer, encoding="utf-8").read()
+    changes = reaudit()
+    rows = claims()
+    problems = answer_problems(answer, {c["id"]: c for c in rows})
+    if problems and not a.draft:
+        finish({"refused": "report not written", "fix": problems}, 1)
+    write_file(ROOT / "report.md", render(title, answer, rows, changes, a.high_stakes, problems))
+    finish({"report": str(ROOT / "report.md"), **({"draft_problems": problems} if problems else {})})
+
+
+if __name__ == "__main__":
+    main()

@@ -25,8 +25,12 @@ AGENTS.md         the question (you write it) and how any agent should work here
 .skills/gauntlet/
   SKILL.md        the research loop, rules and field guide
   roles/          reader, synthesizer, ideator, prover, breaker, referee, writer
-  scripts/        source.py, claim.py, run_test.py, label.py, report.py
-    common.py     the checks they share
+  scripts/
+    source.py     reads sources and keeps exact copies
+    claim.py      records claims and ideas; checks quotes and numbers
+    run_test.py   runs tests on the agent's seeds and on held-out seeds
+    label.py      gives labels the evidence earns
+    report.py     re-checks everything and writes the report
     tests/        tests for the scripts
 sources/          exact copies of every source read
 runs/             test scripts and the log of every run

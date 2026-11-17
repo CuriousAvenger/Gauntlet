@@ -6,22 +6,64 @@ checked word for word against this copy.
   source.py URL --from 8000        the next part
   source.py URL --find REGEX       matching lines, to copy quotes word for word
   source.py URL --text-file F      save text you read yourself, for a page Gauntlet cannot fetch
+
+This file also owns the research folder's location and the JSON output the other scripts use.
 """
 from __future__ import annotations
 
 import argparse
+import hashlib
 import io
 import json
+import os
 import re
+import sys
+import tempfile
 import urllib.error
 import urllib.request
 from html.parser import HTMLParser
+from pathlib import Path
+from typing import Any, NoReturn
 
-from common import INDEX, ROOT, fail, finish, sha256, source_text, sources, write_file
-
+# The research folder: the template copy that contains .skills/ (or $GAUNTLET_ROOT).
+ROOT = Path(os.environ.get("GAUNTLET_ROOT") or Path(__file__).resolve().parents[3])
+INDEX = ROOT / "sources" / "index.json"  # url -> saved copy (S1.txt, ...) and its hash, or why it was unreadable
 CHUNK = 8000
 MAX_BYTES = 25 * 1024 * 1024
 
+
+def finish(result: dict[str, Any], code: int = 0) -> NoReturn:
+    """Print one JSON object and exit: 0 = done, 1 = refused, 2 = misuse."""
+    print(json.dumps(result, indent=1, ensure_ascii=False))
+    sys.exit(code)
+
+
+def fail(message: str, code: int = 2) -> NoReturn:
+    finish({"error": message}, code)
+
+
+def write_file(path: Path, text: str) -> None:
+    """Atomic write, so a crash never leaves a half-written record."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=path.parent)
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        f.write(text)
+    os.replace(tmp, path)
+
+
+def sha256(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def sources() -> dict[str, dict[str, Any]]:
+    return json.loads(INDEX.read_text()) if INDEX.exists() else {}
+
+
+def source_text(src: dict[str, Any]) -> str:
+    return (ROOT / src["file"]).read_text(encoding="utf-8", errors="replace")
+
+
+# ---- fetching -------------------------------------------------------------------------
 
 class FetchError(Exception):
     pass
@@ -84,7 +126,7 @@ def fetch(url: str, timeout: int = 60) -> tuple[str, str]:
     return text, parser.title.strip()
 
 
-def save(url: str, page_text: str | None) -> dict:
+def save(url: str, page_text: str | None) -> dict[str, Any]:
     """Saved copy of `url`, fetching it on first use; failures are recorded as unreadable."""
     index = sources()
     src = index.get(url)
@@ -99,9 +141,10 @@ def save(url: str, page_text: str | None) -> dict:
         index[url] = {"id": sid, "url": url, "status": "unreadable", "reason": str(e)}
         write_file(INDEX, json.dumps(index, indent=1))
         fail(f"unreadable, so it cannot be cited: {e}. If you can read the page, use --text-file.", 1)
-    write_file(ROOT / "sources" / f"{sid}.txt", text)
+    path = ROOT / "sources" / f"{sid}.txt"
+    write_file(path, text)
     index[url] = {"id": sid, "url": url, "title": title or url, "status": "read", "file": f"sources/{sid}.txt",
-                  "sha256": sha256(ROOT / "sources" / f"{sid}.txt"), "supplied_by_agent": page_text is not None}
+                  "sha256": sha256(path), "supplied_by_agent": page_text is not None}
     write_file(INDEX, json.dumps(index, indent=1))
     return index[url]
 

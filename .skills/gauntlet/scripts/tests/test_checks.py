@@ -1,4 +1,4 @@
-from common import normalize, numbers, quote_in
+from claim import normalize, numbers, quote_in
 
 
 def test_quote_in():
