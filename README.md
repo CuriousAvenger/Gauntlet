@@ -20,6 +20,9 @@ Python 3.10+ and nothing else.
 2. Write the question under `## Question` in `AGENTS.md`.
 3. Open the folder with your agent and ask it to research the question.
 
+Optional: set `OPENALEX_API_KEY` (free from OpenAlex) to search journals in every field;
+without it, literature search uses arXiv only.
+
 `AGENTS.md` also points the agent to `.skills/gauntlet/SKILL.md`, which holds the research
 loop. `.skills/gauntlet/` is a standard Agent Skills folder, for agents that load skills.
 
@@ -31,18 +34,22 @@ AGENTS.md         the question (you write it) and how any agent should work here
   SKILL.md        the research loop, rules and field guide
   roles/          reader, synthesizer, ideator, judge, prover, breaker, referee, writer
   scripts/
-    source.py     reads sources and keeps exact copies
+    search.py     searches arXiv and OpenAlex beyond the sources already read
+    source.py     reads sources and keeps exact copies (arXiv papers pinned to one version)
     claim.py      records claims and ideas; checks quotes and numbers; filters duplicate ideas
-    rank.py       pairs ideas for judging, keeps Elo scores, picks the best of each cluster
-    run_test.py   runs tests on the agent's seeds and on held-out seeds
+    rank.py       pairs ideas for judging, keeps Elo scores, picks the best of each cluster,
+                  summarises verdicts for the meta-review
+    run_test.py   runs tests on the agent's seeds and on held-out seeds, with resource limits
     label.py      gives labels the evidence earns
     report.py     re-checks everything and writes the report
-    lib/          specialised helpers (word-overlap similarity)
+    lib/          specialised helpers: arXiv reader, literature search, source identity,
+                  web fetching, word-overlap similarity
     tests/        tests for the scripts
 sources/          exact copies of every source read
 runs/             test scripts and the log of every run
 claims.jsonl      every claim and idea, with quotes, tests and label   (created by the run)
 tournament.jsonl  every judged comparison of two ideas                (created by the run)
+meta_review.md    what the judges rewarded, for the next generation   (created by the run)
 evidence_map.md   what sources agree and disagree on, what is open      (created by the run)
 report.md         the final report                                      (created by the run)
 ```
@@ -54,7 +61,8 @@ reliably do for itself:
 
 | The agent… | Gauntlet… |
 |---|---|
-| reads a source (`source.py`) | fetches the page itself and keeps an exact copy |
+| searches the literature (`search.py`) | queries arXiv (and OpenAlex) and marks results already read |
+| reads a source (`source.py`) | fetches the page itself and keeps an exact copy; pins arXiv papers to one version; records each source's identity, so a preprint and its journal version count as one work |
 | records a claim with a quote (`claim.py`) | confirms the quote is word for word in that copy and every number traces to it |
 | proposes an idea (`claim.py`) | requires the closest prior work quoted word for word, refuses near-duplicates of earlier ideas, and suggests the closest passages to quote |
 | judges two ideas (`rank.py`) | records the verdict, recomputes Elo scores from every verdict, and groups similar ideas so the top stays diverse |
@@ -64,7 +72,7 @@ reliably do for itself:
 
 | Label | Requires |
 |---|---|
-| Established | Two or more independent sources, quoted word for word |
+| Established | Two or more independent works (not two versions of one paper), quoted word for word |
 | Reported | One source, quoted word for word |
 | Contested | Quotes on both sides |
 | New idea: tested | Passed on held-out seeds, and independently written code reproduces the result within 10% |

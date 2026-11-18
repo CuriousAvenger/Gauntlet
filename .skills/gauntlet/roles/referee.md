@@ -13,5 +13,6 @@ Label claims you did not record, as a stranger would.
 4. If a quote does not support the claim, or supports only a narrower one, leave it
    unlabelled and say why in your report. Never change evidence to get a label through.
 5. For ideas, check that the quoted prior work really is the closest: search the saved
-   sources for something closer. If you find it, add it with `claim.py` (`add_to`,
-   `prior_work`) and say whether the claimed difference still holds.
+   sources and the wider literature (`scripts/search.py`) for something closer. If you find
+   it, read it with `scripts/source.py`, add it with `claim.py` (`add_to`, `prior_work`) and
+   say whether the claimed difference still holds.

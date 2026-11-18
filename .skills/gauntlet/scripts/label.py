@@ -17,8 +17,9 @@ from statistics import mean
 from typing import Any
 
 from claim import claims, get_claim, grounding_problems, number_problems, put_claim, quote_problems, save_claims
+from lib.identity import count_works
 from run_test import execute, is_stale
-from source import ROOT, fail, finish
+from source import ROOT, fail, finish, sources
 
 LABELS = ("established", "reported", "contested", "tested", "refuted", "untested")
 NAMES = {"established": "Established", "reported": "Reported", "contested": "Contested",
@@ -85,7 +86,11 @@ def unmet(claim: dict[str, Any]) -> dict[str, list[str]]:
     disagree = any(q.get("disagrees") for q in claim["quotes"])
     out["reported"] = (common + ([] if agree else ["no quote supports it"])
                        + (["a source disagrees: use contested"] if disagree else []))
-    out["established"] = out["reported"] + ([] if len(agree) >= 2 else ["needs two or more independent sources"])
+    index = sources()
+    works = count_works([index[u] for u in agree if u in index])
+    out["established"] = out["reported"] + ([] if works >= 2 else [
+        "needs two or more independent sources" + (" (these quotes come from one work, e.g. a preprint and its "
+                                                   "published version)" if len(agree) >= 2 else "")])
     out["contested"] = common + ([] if agree and disagree else ["needs quotes on both sides"])
     return out
 

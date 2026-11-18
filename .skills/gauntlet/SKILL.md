@@ -20,9 +20,10 @@ that you can read directly: `claims.jsonl`, `sources/`, `runs/`, `tournament.jso
 
 | Script | Use it to |
 |---|---|
-| `source.py URL [--find REGEX]` | Read a source. Gauntlet fetches it and keeps an exact copy; quote from this text, not from your own web tools, which may summarise |
+| `search.py "QUERY"` | Search arXiv (and OpenAlex, if `OPENALEX_API_KEY` is set) beyond the sources already read |
+| `source.py URL [--find REGEX]` | Read a source. Gauntlet fetches it and keeps an exact copy (arXiv papers pinned to one version); quote from this text, not from your own web tools, which may summarise |
 | `claim.py` (JSON on stdin) | Record a claim with quotes, or an idea with its closest prior work and the test that would settle it |
-| `rank.py pairs` / `match` / `top` | Get pairs of ideas to compare, record verdicts, and see the leaderboard and the diverse top |
+| `rank.py pairs` / `match` / `top` / `review` | Get pairs of ideas to compare, record verdicts, see the leaderboard and the diverse top, and review what the verdicts rewarded |
 | `run_test.py IDEA ROLE SCRIPT` | Have Gauntlet run a test script on your seeds and on held-out seeds |
 | `label.py ID LABEL` | Give a claim a label; refused, with reasons, unless earned |
 | `report.py --answer FILE` | Re-check everything and write `report.md` |
@@ -43,7 +44,9 @@ Each script's `--help` shows its exact usage. In the role files, `scripts/` mean
       question: statistics, signal processing, numerical linear algebra, hardware). Give
       each ideator one lens. Generation 1 diverges; later generations evolve the diverse top.
    2. *Compare* (role: `roles/judge.md`). Judges, never the ideators themselves, work through
-      `rank.py pairs` until every idea has been compared about three times.
+      `rank.py pairs` until every idea has been compared about three times. Then one judge
+      writes the meta-review, `meta_review.md`: what kept winning and losing, and why. The next
+      generation's ideators read it.
    3. *Test* (roles: `roles/prover.md`, `roles/breaker.md`). Take the diverse top from
       `rank.py top`: the best idea of each cluster, not the top few of one cluster. For each,
       a prover and a breaker work independently, and a second prover replicates any passing

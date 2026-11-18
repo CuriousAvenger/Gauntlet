@@ -8,11 +8,16 @@ ROLE is support (the test of the idea), replication (independently written code 
 --replicates), or counterexample (an attack: pass=false means the idea broke).
 The script takes --seed N and ends by printing:
   GAUNTLET_RESULT {"pass": true, "headline": {"name": 8.1}}
+
+Each run is limited (on Linux and macOS) to 120 s of CPU, $GAUNTLET_TEST_MEMORY_MB of memory
+(default 4096) and 512 MB per file written. These limits stop runaway scripts; they are
+not a security sandbox, and network access is left open for tests that download data.
 """
 from __future__ import annotations
 
 import argparse
 import json
+import os
 import random
 import shutil
 import subprocess
@@ -25,6 +30,19 @@ from source import ROOT, fail, finish, sha256, write_file
 
 HELD_OUT_SEEDS = 3
 TIMEOUT_S = 120
+MEMORY_MB = int(os.environ.get("GAUNTLET_TEST_MEMORY_MB", "4096"))
+FILE_MB = 512
+
+
+def _limits() -> None:
+    """Runs in the child process before the test script starts (POSIX only)."""
+    import resource
+    for limit, value in ((resource.RLIMIT_CPU, TIMEOUT_S), (resource.RLIMIT_AS, MEMORY_MB * 2**20),
+                         (resource.RLIMIT_FSIZE, FILE_MB * 2**20)):
+        try:
+            resource.setrlimit(limit, (value, value))
+        except (ValueError, OSError):
+            pass  # some platforms do not support every limit
 
 
 def is_stale(test: dict[str, Any]) -> bool:
@@ -36,7 +54,8 @@ def is_stale(test: dict[str, Any]) -> bool:
 def _run(test: dict[str, Any], seed: int, held_out: bool) -> dict[str, Any]:
     cmd = [sys.executable, str(ROOT / test["script"]), "--seed", str(seed)]
     try:
-        proc = subprocess.run(cmd, cwd=ROOT, capture_output=True, text=True, timeout=TIMEOUT_S)
+        proc = subprocess.run(cmd, cwd=ROOT, capture_output=True, text=True, timeout=TIMEOUT_S,
+                              preexec_fn=_limits if os.name == "posix" else None)
         output, ok = proc.stdout + proc.stderr, proc.returncode == 0
     except subprocess.TimeoutExpired:
         output, ok = f"timed out after {TIMEOUT_S}s", False

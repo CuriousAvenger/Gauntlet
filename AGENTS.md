@@ -13,6 +13,6 @@ Research the question above with Gauntlet: follow `.skills/gauntlet/SKILL.md`, w
 describes the research loop, the roles and the scripts that check every claim.
 
 Records live in this folder: `sources/` (exact copies of sources), `claims.jsonl`,
-`runs/` (test scripts and logs), `tournament.jsonl` (idea comparisons), `evidence_map.md`,
-`answer.md` and `report.md`. Change
+`runs/` (test scripts and logs), `tournament.jsonl` (idea comparisons), `meta_review.md`,
+`evidence_map.md`, `answer.md` and `report.md`. Change
 them only through the scripts in `.skills/gauntlet/scripts/`.

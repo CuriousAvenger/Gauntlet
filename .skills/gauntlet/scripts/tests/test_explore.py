@@ -42,9 +42,9 @@ def test_tournament_elo_and_diverse_top(run, sources):
     c = propose(run, "Classical shadows with derandomisation beat uniform Pauli sampling for chemistry.")[1]["id"]
     pairs = run("rank.py", "pairs", "--n", "5")[1]["pairs"]
     assert len(pairs) == 1 and len({p["id"] for p in pairs[0]}) == 2   # three ideas: one disjoint pair per round
-    assert run("rank.py", "match", a, b, a, "--reason", "clearer test")[0] == 0
-    assert run("rank.py", "match", a, c, a, "--reason", "more important")[0] == 0
-    assert run("rank.py", "match", a, a, a, "--reason", "x")[0] == 2
+    assert run("rank.py", "match", a, b, a, "--criterion", "testability", "--reason", "clearer test")[0] == 0
+    assert run("rank.py", "match", a, c, a, "--criterion", "importance", "--reason", "more important")[0] == 0
+    assert run("rank.py", "match", a, a, a, "--criterion", "importance", "--reason", "x")[0] == 2
     top = run("rank.py", "top", "--k", "5")[1]
     assert [r["id"] for r in top["leaderboard"]][0] == a
     assert [r["id"] for r in top["diverse_top"]] == [a, c]   # b is in a's cluster, so it is not in the diverse top
@@ -53,4 +53,14 @@ def test_tournament_elo_and_diverse_top(run, sources):
 
 def test_pending_ideas_are_not_ranked(run, sources):
     out = run("claim.py", stdin={"statement": "An ungrounded idea about readout.", "settling_test": "try it"})[1]
-    assert run("rank.py", "match", out["id"], out["id"], "draw", "--reason", "x")[0] == 2
+    assert run("rank.py", "match", out["id"], out["id"], "draw", "--criterion", "importance", "--reason", "x")[0] == 2
+
+
+def test_review_groups_verdicts_by_deciding_criterion(run, sources):
+    a = propose(run, "Importance sampling cuts readout shots on lattice fluid solvers.")[1]["id"]
+    c = propose(run, "Classical shadows with derandomisation beat uniform Pauli sampling for chemistry.")[1]["id"]
+    run("rank.py", "match", a, c, a, "--criterion", "testability", "--reason", "runs today")
+    review = run("rank.py", "review")[1]
+    assert review["deciding_criteria"]["testability"] == 1
+    assert review["by_criterion"]["testability"][0]["reason"] == "runs today"
+    assert review["records"][a]["won"] == 1 and review["records"][c]["lost"] == 1

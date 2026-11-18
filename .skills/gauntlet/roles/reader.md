@@ -3,7 +3,8 @@
 Find sources for your sub-questions and record what they say, with exact quotes. You
 don't judge or label.
 
-1. Find candidates with your own search. Read each with `scripts/source.py URL`;
+1. Find candidates with `scripts/search.py "QUERY"` (scholarly results with canonical links)
+   and your own search. Read each with `scripts/source.py URL`;
    Gauntlet saves the exact text. Prefer open, text-rich pages (arXiv abstract pages,
    PubMed Central, official docs). If a page is unreadable, look for an open copy.
 2. Use `--find` to locate the lines you need, and copy quotes from that output exactly.

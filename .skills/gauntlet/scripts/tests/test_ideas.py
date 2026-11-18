@@ -52,3 +52,12 @@ def test_held_out_seeds_are_drawn_by_gauntlet(run, sources, tmp_path):
     test = next(json.loads(l) for l in (tmp_path / "claims.jsonl").read_text().splitlines() if l.startswith('{"id": "I'))["tests"][0]
     held = [r["seed"] for r in test["runs"] if r["held_out"]]
     assert len(held) == 3 and 0 not in held
+
+
+def test_runaway_memory_is_stopped(run, sources, tmp_path, monkeypatch):
+    monkeypatch.setenv("GAUNTLET_TEST_MEMORY_MB", "300")
+    iid = run("claim.py", stdin={"statement": "A memory-hungry idea about readout.", "settling_test": "allocate",
+                                 "prior_work": PRIOR, "difference": "uses far more memory"})[1]["id"]
+    (tmp_path / "hog.py").write_text("x = bytearray(2 * 1024**3)\nprint('GAUNTLET_RESULT {\"pass\": true}')\n")
+    code, out = run("run_test.py", iid, "counterexample", "hog.py")
+    assert code == 0 and out["runs"][0]["pass"] is None and "MemoryError" in out["error_log"]

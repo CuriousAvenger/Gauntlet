@@ -2,10 +2,15 @@
 """Rank ideas by judged pairwise comparisons, keeping the search diverse.
 
   rank.py pairs [--n 5]                         the next pairs of ideas for judges to compare
-  rank.py match IDEA_A IDEA_B WINNER --reason "..."   record a verdict (WINNER: IDEA_A, IDEA_B or draw)
+  rank.py match IDEA_A IDEA_B WINNER --criterion C --reason "..."
+                                                record a verdict (WINNER: IDEA_A, IDEA_B or draw;
+                                                C: the deciding criterion, one of difference,
+                                                testability, importance, plausibility)
   rank.py top [--k 5]                           the leaderboard, clusters of similar ideas, and the
                                                 diverse top: the best idea of each cluster, the ones
                                                 to test or evolve next
+  rank.py review [--generation N]               what the verdicts rewarded and why, for the
+                                                meta-review that guides the next generation
 
 Only grounded ideas take part (untested or tested). Scores are Elo ratings recomputed from
 every recorded verdict in tournament.jsonl, so a verdict can never be quietly edited away.
@@ -23,6 +28,7 @@ from source import ROOT, fail, finish
 TOURNAMENT = ROOT / "tournament.jsonl"
 START, K = 1200.0, 32.0
 CLUSTER = 0.35  # ideas at least this similar to a cluster's best idea join that cluster
+CRITERIA = ("difference", "testability", "importance", "plausibility")
 
 
 def eligible() -> dict[str, dict[str, Any]]:
@@ -88,6 +94,31 @@ def next_pairs(n: int) -> list[tuple[str, str]]:
     return pairs
 
 
+def review(generation: int | None = None) -> dict[str, Any]:
+    """Verdicts grouped by deciding criterion, with each idea's record, for a meta-review."""
+    every = {c["id"]: c for c in claims() if "settling_test" in c}
+    elo, _ = ratings()
+    picked = [m for m in matches() if generation is None
+              or generation in (every.get(m["a"], {}).get("generation"), every.get(m["b"], {}).get("generation"))]
+    by_criterion: dict[str, list[dict[str, str]]] = {c: [] for c in CRITERIA}
+    record: dict[str, dict[str, int]] = {}
+    for m in picked:
+        if m["winner"] == "draw":
+            continue
+        loser = m["b"] if m["winner"] == m["a"] else m["a"]
+        by_criterion[m.get("criterion", "difference")].append(
+            {"winner": every.get(m["winner"], {}).get("statement", m["winner"]),
+             "loser": every.get(loser, {}).get("statement", loser), "reason": m["reason"]})
+        record.setdefault(m["winner"], {"won": 0, "lost": 0})["won"] += 1
+        record.setdefault(loser, {"won": 0, "lost": 0})["lost"] += 1
+    tested = [{"id": c["id"], "label": c["label"], "statement": c["statement"]}
+              for c in every.values() if c["label"] in ("tested", "refuted")]
+    return {"verdicts": len(picked), "deciding_criteria": {c: len(v) for c, v in by_criterion.items()},
+            "by_criterion": {c: v[-10:] for c, v in by_criterion.items() if v},
+            "records": {i: {**r, "elo": round(elo.get(i, START))} for i, r in record.items()},
+            "test_outcomes": tested}
+
+
 def _brief(c: dict[str, Any]) -> dict[str, Any]:
     return {"id": c["id"], "statement": c["statement"], "difference": c.get("difference", ""),
             "closest_prior_work": [f"{q['source']}: \"{q['quote']}\"" for q in c.get("prior_work", [])],
@@ -102,8 +133,10 @@ def main() -> None:
     m.add_argument("a")
     m.add_argument("b")
     m.add_argument("winner")
+    m.add_argument("--criterion", required=True, choices=CRITERIA)
     m.add_argument("--reason", required=True)
     sub.add_parser("top").add_argument("--k", type=int, default=5)
+    sub.add_parser("review").add_argument("--generation", type=int)
     a = p.parse_args()
 
     ideas = eligible()
@@ -120,9 +153,12 @@ def main() -> None:
         if not a.reason.strip():
             fail("give the reason for the verdict")
         with open(TOURNAMENT, "a", encoding="utf-8") as f:
-            f.write(json.dumps({"a": a.a, "b": a.b, "winner": a.winner, "reason": a.reason.strip()}) + "\n")
+            f.write(json.dumps({"a": a.a, "b": a.b, "winner": a.winner, "criterion": a.criterion,
+                                "reason": a.reason.strip()}) + "\n")
         elo, _ = ratings()
         finish({"recorded": f"{a.a} vs {a.b}: {a.winner}", "elo": {i: round(elo[i]) for i in (a.a, a.b)}})
+    if a.command == "review":
+        finish(review(a.generation))
     board = leaderboard()
     top = diverse_top(a.k)
     gens: dict[int, dict[str, int]] = {}
