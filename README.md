@@ -20,11 +20,14 @@ Python 3.10+ and nothing else.
 2. Write the question under `## Question` in `AGENTS.md`.
 3. Open the folder with your agent and ask it to research the question.
 
-Optional: set `OPENALEX_API_KEY` (free from OpenAlex) to search journals in every field;
-without it, literature search uses arXiv only.
+Optional: set `OPENALEX_API_KEY` (free from OpenAlex) to search journals in every field,
+refuse retracted papers, and find open copies of paywalled ones. Without it, literature
+search uses arXiv only.
 
 `AGENTS.md` also points the agent to `.skills/gauntlet/SKILL.md`, which holds the research
 loop. `.skills/gauntlet/` is a standard Agent Skills folder, for agents that load skills.
+
+See [docs/example.md](docs/example.md) for a short worked example.
 
 ## What the folder holds
 

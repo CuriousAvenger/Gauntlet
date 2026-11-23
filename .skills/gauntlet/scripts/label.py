@@ -12,15 +12,13 @@ This file also owns the label rules and the re-audit that report.py runs.
 """
 from __future__ import annotations
 
-import argparse
-import datetime
 from statistics import mean
 from typing import Any
 
 from claim import claims, get_claim, grounding_problems, number_problems, put_claim, quote_problems, save_claims
 from lib.identity import count_works
 from run_test import execute, is_stale
-from source import ROOT, Parser, finish, locked, sources
+from source import ROOT, Parser, finish, locked, now, sources
 
 LABELS = ("established", "reported", "contested", "tested", "refuted", "untested")
 NAMES = {"established": "Established", "reported": "Reported", "contested": "Contested",
@@ -115,20 +113,21 @@ def _reaudit() -> list[dict[str, str]]:
                 execute(t)
         if c["label"] == "pending":
             continue
+        if (c.get("history") or [{}])[-1].get("label") != c["label"]:  # edited into claims.jsonl by hand
+            changes.append({"id": c["id"], "from": c["label"], "to": "pending", "why": "label was not set by the scripts"})
+            c.setdefault("history", []).append({"label": "pending", "reason": "label was not set by the scripts", "at": now()})
+            c["label"] = "pending"
+            continue
         missing = unmet(c)
         if missing[c["label"]] or (c["label"] == "tested" and not missing["refuted"]):
             order = ("refuted", "tested", "untested") if "settling_test" in c else ("established", "contested", "reported")
             new = next((label for label in order if not missing[label]), "pending")
-            changes.append({"id": c["id"], "from": c["label"], "to": new})
-            c.setdefault("history", []).append({"label": new, "reason": "re-check: " + "; ".join(missing[c["label"]][:2]),
-                                                "at": _now()})
+            why = "; ".join(missing[c["label"]][:2]) or "a test now fails"
+            changes.append({"id": c["id"], "from": c["label"], "to": new, "why": why})
+            c.setdefault("history", []).append({"label": new, "reason": f"re-check: {why}", "at": now()})
             c["label"] = new
     save_claims(rows)
     return changes
-
-
-def _now() -> str:
-    return datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds")
 
 
 def main() -> None:
@@ -142,7 +141,7 @@ def main() -> None:
         missing = unmet(claim)[a.label]
         if missing:
             finish({"id": claim["id"], "refused": a.label, "label": NAMES[claim["label"]], "missing": missing}, 1)
-        claim.setdefault("history", []).append({"label": a.label, "reason": a.reason.strip(), "at": _now()})
+        claim.setdefault("history", []).append({"label": a.label, "reason": a.reason.strip(), "at": now()})
         claim["label"] = a.label
         put_claim(claim)
     finish({"id": claim["id"], "label": NAMES[a.label]})

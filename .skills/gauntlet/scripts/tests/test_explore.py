@@ -71,3 +71,10 @@ def test_pair_order_is_randomised_against_position_bias(run, sources):
     propose(run, "Classical shadows with derandomisation beat uniform Pauli sampling for chemistry.")
     firsts = {run("rank.py", "pairs")[1]["pairs"][0][0]["id"] for _ in range(12)}
     assert firsts == {"I1", "I2"}
+
+
+def test_idea_limit_caps_exploration(run, sources, monkeypatch):
+    monkeypatch.setenv("GAUNTLET_MAX_IDEAS", "1")
+    assert propose(run, "Importance sampling cuts readout shots on lattice fluid solvers.")[0] == 0
+    code, out = propose(run, "Classical shadows with derandomisation beat uniform Pauli sampling for chemistry.")
+    assert code == 1 and "GAUNTLET_MAX_IDEAS" in out["error"]

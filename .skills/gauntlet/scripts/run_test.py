@@ -25,9 +25,10 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from claim import get_claim, put_claim
+from claim import claims, get_claim, put_claim
 from source import ROOT, Parser, fail, finish, locked, sha256, write_file
 
+MAX_TESTS = int(os.environ.get("GAUNTLET_MAX_TESTS", "60"))  # caps exploration cost
 HELD_OUT_SEEDS = 3
 TIMEOUT_S = 120
 MEMORY_MB = int(os.environ.get("GAUNTLET_TEST_MEMORY_MB", "4096"))
@@ -103,6 +104,8 @@ def main() -> None:
         fail(f"--replicates must name a support test of {a.idea}: "
              f"{[t['id'] for t in idea['tests'] if t['role'] == 'support']}")
 
+    if sum(len(c["tests"]) for c in claims()) >= MAX_TESTS:
+        fail(f"the test limit ({MAX_TESTS}, set by GAUNTLET_MAX_TESTS) is reached; decide with the tests already run", 1)
     with locked():  # reserve a test id: the frozen script's file name claims it
         (ROOT / "runs").mkdir(exist_ok=True)
         n = len(idea["tests"]) + 1

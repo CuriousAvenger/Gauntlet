@@ -27,15 +27,17 @@ This file also owns claims.jsonl and the quote and number checks.
 from __future__ import annotations
 
 import json
+import os
 import re
 import sys
 import unicodedata
 from typing import Any
 
 from lib.similarity import closest, passages, similarity
-from source import ROOT, fail, finish, locked, sha256, source_text, sources, write_file
+from source import ROOT, fail, finish, locked, now, sha256, source_text, sources, write_file
 
 CLAIMS = ROOT / "claims.jsonl"
+MAX_IDEAS = int(os.environ.get("GAUNTLET_MAX_IDEAS", "60"))  # caps exploration cost
 DUPLICATE = 0.9      # at or above: the same idea reworded, refused
 SIMILAR = 0.6        # at or above: accepted only with a stated difference (distinct_from)
 
@@ -102,6 +104,8 @@ def quote_problems(claim: dict[str, Any]) -> list[str]:
         src = index.get(q["url"])
         if not src or src["status"] != "read":
             problems.append(f"{q['source']}: source was not read")
+        elif src.get("retracted") or src.get("withdrawn"):
+            problems.append(f"{q['source']}: the paper was retracted or withdrawn")
         elif sha256(ROOT / src["file"]) != src["sha256"]:
             problems.append(f"{q['source']}: saved copy was edited after it was fetched")
         elif len(normalize(q["quote"])) < 20:
@@ -167,6 +171,8 @@ def _entries(items: list[dict[str, Any]], index: dict[str, Any]) -> list[dict[st
             fail(f"read {q.get('url')} with source.py first, then quote from it", 1)
         if src["status"] != "read":
             fail(f"{q['url']} could not be read ({src['reason']}), so it cannot be cited", 1)
+        if src.get("retracted") or src.get("withdrawn"):
+            fail(f"{q['url']} was retracted or withdrawn, so it cannot be cited", 1)
         out.append({"source": src["id"], "url": q["url"], "quote": q["quote"].strip(), "disagrees": bool(q.get("disagrees"))})
     return out
 
@@ -206,6 +212,8 @@ def main() -> None:
                 claim["prior_work"] = claim.get("prior_work", []) + prior
                 claim["difference"] = req.get("difference", claim.get("difference", "")).strip()
         elif req.get("settling_test"):
+            if sum("settling_test" in c for c in claims()) >= MAX_IDEAS:
+                fail(f"the idea limit ({MAX_IDEAS}, set by GAUNTLET_MAX_IDEAS) is reached; evolve or test existing ideas", 1)
             statement = req.get("statement", "").strip()
             distinct = req.get("distinct_from") or {}
             _check_duplicates(statement, distinct)
@@ -230,6 +238,8 @@ def main() -> None:
             problems = grounding_problems(claim)
             if claim["label"] == "pending" and not problems:
                 claim["label"] = "untested"
+                claim.setdefault("history", []).append({"label": "untested", "at": now(),
+                                                        "reason": "grounded: prior work quoted, difference stated"})
             out["closest_in_sources"] = closest_in_sources(claim["statement"] + " " + claim.get("difference", ""))
         else:
             problems = quote_problems(claim) + number_problems(claim)

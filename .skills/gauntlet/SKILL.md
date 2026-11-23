@@ -66,6 +66,9 @@ subagents: they lock the records while writing. In the role files, `scripts/` me
 | standard | ~30 | 4 | 2 | top 3 of the diverse top |
 | deep | 50+ | 5–6 | up to 5 | top 5 of the diverse top |
 
+To bound cost, the scripts refuse more than 60 ideas or 60 tests per folder (change with
+`GAUNTLET_MAX_IDEAS` and `GAUNTLET_MAX_TESTS`).
+
 If you can start subagents, give each one the role file and its task.
 Use a fast model for readers, ideators, provers and breakers, and your strongest model for
 the synthesizer, judges and referees. If you cannot, play the roles yourself, one at a time.

@@ -12,7 +12,8 @@ Compare ideas in pairs; your verdicts rank them. Judge ideas you did not propose
    - **Testability:** can the settling test actually be run with the tools available, and
      could it fail?
    - **Importance:** if it held, how much would it change the answer to the question?
-   - **Plausibility:** does the evidence in the claims make it worth a test?
+   - **Plausibility:** does the evidence in the claims make it worth a test? An idea that has
+     already passed its test beats an otherwise equal untested one.
 3. Record each verdict:
    `scripts/rank.py match IDEA_A IDEA_B WINNER --criterion C --reason "..."`, where WINNER is one
    of the two ids or `draw`, C is the criterion that decided it (difference, testability,

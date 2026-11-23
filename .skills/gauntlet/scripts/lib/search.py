@@ -45,6 +45,19 @@ def openalex(query: str, n: int) -> list[dict[str, Any]]:
     return parse_openalex(json.loads(web.get(f"{OPENALEX}?{params}")[0]))
 
 
+def work(doi: str) -> dict[str, Any] | None:
+    """OpenAlex's record of one paper: whether it was retracted and where an open copy is.
+    None without a key, a DOI or a reachable service (the checks then simply don't run)."""
+    key = os.environ.get("OPENALEX_API_KEY")
+    if not key or not doi:
+        return None
+    try:
+        w = json.loads(web.get(f"{OPENALEX}/doi:{urllib.parse.quote(doi)}?api_key={key}")[0])
+    except (web.FetchError, ValueError):
+        return None
+    return {"retracted": bool(w.get("is_retracted")), "open_copy": (w.get("open_access") or {}).get("oa_url") or ""}
+
+
 def search(query: str, n: int, where: str, cache: Path) -> dict[str, Any]:
     """{"results": [...], "unavailable": {service: reason}}, from cache when possible."""
     path = cache / (hashlib.sha256(f"{where}|{n}|{query}".encode()).hexdigest()[:20] + ".json")

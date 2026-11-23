@@ -62,3 +62,21 @@ def test_labels_record_who_decided_and_why(run, sources):
     import json
     row = next(json.loads(l) for l in (sources / "claims.jsonl").read_text().splitlines() if cid in l)
     assert row["history"][-1]["reason"] == "the quote states it directly" and row["history"][-1]["label"] == "reported"
+
+
+def test_labels_edited_by_hand_are_reverted(run, sources):
+    cid = claim(run, "Shots fell 8.0-fold.", "https://a.example/paper")["id"]
+    path = sources / "claims.jsonl"
+    path.write_text(path.read_text().replace('"label": "pending"', '"label": "established"'))
+    (sources / "answer.md").write_text("Nothing is cited here.")
+    run("report.py", "--question", "Q?", "--answer", "answer.md", "--draft")
+    assert '"label": "pending"' in path.read_text()
+    assert "not set by the scripts" in (sources / "report.md").read_text()
+
+
+def test_retracted_papers_cannot_be_cited(run, sources):
+    index = sources / "sources" / "index.json"
+    index.write_text(index.read_text().replace('"status": "read"', '"retracted": true, "status": "read"', 1))
+    code, out = run("claim.py", stdin={"statement": "Shots fell 8.0-fold.",
+                                       "quotes": [{"url": "https://a.example/paper", "quote": QUOTE}]})
+    assert code == 1 and "retracted" in out["error"]

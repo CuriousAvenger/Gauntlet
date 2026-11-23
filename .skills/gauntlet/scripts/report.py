@@ -96,7 +96,8 @@ def render(title, answer, rows, changes, high_stakes, problems):
         out.append(f"- Claims that earned no label, left out above: {', '.join(pending)}.")
     out += [f"- {s['id']} could not be read ({s['reason']}): {s['url']}" for s in srcs if s["status"] != "read"]
     out += [f"- {s['id']} was supplied by the agent, not fetched by Gauntlet." for s in srcs if s.get("supplied_by_agent")]
-    out += [f"- {ch['id']} moved from {NAMES[ch['from']]} to {NAMES[ch['to']]} when re-checked." for ch in changes]
+    out += [f"- {ch['id']} moved from {NAMES[ch['from']]} to {NAMES[ch['to']]} when re-checked: {ch['why']}."
+            for ch in changes]
     out += ["- Gauntlet checks that quotes exist word for word and that numbers trace to evidence; whether a quote "
             "supports its claim is the referee's judgement.",
             "- Anything absent was not found in the sources read, which does not mean it does not exist.", ""]

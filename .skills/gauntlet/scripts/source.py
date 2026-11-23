@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+import datetime
 import hashlib
 import json
 import os
@@ -27,7 +28,7 @@ import tempfile
 from pathlib import Path
 from typing import Any, Iterator, NoReturn
 
-from lib import arxiv, identity, web
+from lib import arxiv, identity, search, web
 
 # The research folder: the template copy that contains .skills/ (or $GAUNTLET_ROOT).
 ROOT = Path(os.environ.get("GAUNTLET_ROOT") or Path(__file__).resolve().parents[3])
@@ -63,6 +64,10 @@ def write_file(path: Path, text: str) -> None:
     with os.fdopen(fd, "w", encoding="utf-8") as f:
         f.write(text)
     os.replace(tmp, path)
+
+
+def now() -> str:
+    return datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds")
 
 
 def sha256(path: Path) -> str:
@@ -124,10 +129,22 @@ def save(url: str, page_text: str | None, title: str | None = None) -> dict[str,
         return src
     if src and page_text is None:
         fail(f"unreadable, so it cannot be cited: {src['reason']}. If you can read it, use --text-file.", 1)
+    doi = next((k[4:] for k in identity.keys(url) if k.startswith("doi:")), "")
     try:
         text, fetched_title, extra = (page_text, "", {}) if page_text is not None else _read(url)
     except web.FetchError as e:
         text, error = None, str(e)
+        copy = (search.work(doi) or {}).get("open_copy")  # a paywalled paper may have a legal open copy
+        if copy and copy != url:
+            try:
+                text, fetched_title, extra = _read(copy)
+                extra["open_copy"] = copy
+            except web.FetchError:
+                pass
+    if text is not None:
+        doi = doi or extra.get("meta", {}).get("citation_doi", "")
+        if (search.work(doi) or {}).get("retracted"):
+            extra["retracted"] = True
     with locked():
         index = sources()
         src = index.get(url)
@@ -163,11 +180,11 @@ if __name__ == "__main__":
     src = save(a.url, open(a.text_file, encoding="utf-8").read() if a.text_file else None, a.title)
     text = source_text(src)
     out = {"source": src["id"], "title": src["title"], "chars": len(text)}
-    for key in ("pinned", "text_from", "same_work_as"):
+    for key in ("pinned", "text_from", "open_copy", "same_work_as"):
         if src.get(key):
             out[key] = src[key]
-    if src.get("withdrawn"):
-        out["warning"] = "the authors have withdrawn this paper"
+    if src.get("withdrawn") or src.get("retracted"):
+        out["warning"] = "this paper was withdrawn or retracted; it cannot be cited"
     if src.get("text_from") == "abstract only":
         out["warning"] = "only the abstract could be read; quote only from it"
     if a.find:

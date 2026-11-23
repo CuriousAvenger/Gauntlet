@@ -89,3 +89,25 @@ def test_two_versions_of_one_paper_are_one_source(run, tmp_path):
     code, out = run("label.py", cid, "established", "--reason", "test")
     assert code == 1 and "one work" in out["missing"][0]
     assert run("label.py", cid, "reported", "--reason", "test")[0] == 0
+
+
+def test_openalex_lookup_and_open_copy_fallback(monkeypatch, tmp_path):
+    import source
+    monkeypatch.setenv("OPENALEX_API_KEY", "test-key")
+    monkeypatch.setattr(web, "get", lambda url, timeout=60: (json.dumps(
+        {"is_retracted": True, "open_access": {"oa_url": "https://repo.example/open.pdf"}}).encode(), "application/json"))
+    assert search.work("10.1/x") == {"retracted": True, "open_copy": "https://repo.example/open.pdf"}
+    monkeypatch.delenv("OPENALEX_API_KEY")
+    assert search.work("10.1/x") is None  # no key: the checks simply don't run
+
+    monkeypatch.setattr(source, "ROOT", tmp_path)
+    monkeypatch.setattr(source, "INDEX", tmp_path / "sources" / "index.json")
+    monkeypatch.setattr(search, "work", lambda doi: {"retracted": False, "open_copy": "https://repo.example/open"})
+
+    def read(url):
+        if "doi.org" in url:
+            raise web.FetchError("HTTP 403 (likely paywalled)")
+        return PAGE, "An open copy", {}
+    monkeypatch.setattr(source, "_read", read)
+    row = source.save("https://doi.org/10.1234/paywalled", None)
+    assert row["status"] == "read" and row["open_copy"] == "https://repo.example/open" and row["ids"] == ["doi:10.1234/paywalled"]
