@@ -8,7 +8,6 @@ arXiv needs no key; OpenAlex (journals in every field) needs a free API key in
 $OPENALEX_API_KEY and is skipped without one. Results are cached in sources/search_cache/.
 A result is only a lead: read it with source.py before quoting it.
 """
-import argparse
 
 from lib.identity import keys, same_work
 from lib.search import search

@@ -15,7 +15,6 @@ not a security sandbox, and network access is left open for tests that download 
 """
 from __future__ import annotations
 
-import argparse
 import json
 import os
 import random

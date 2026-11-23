@@ -1,92 +1,84 @@
 # Gauntlet
 
-A research template for AI agents. Copy it into a new folder for each problem you want
-to research, write the question, and let your agent work on it. The result is a report
-where **every claim shows how it was checked**: facts carry exact quotes from saved
-sources, and new ideas carry the tests they passed or failed, or say they are untested.
+A research template for AI agents. Copy it into a new folder for each problem, write the
+question, and let your agent research it. The report shows **how every claim was
+checked**: facts carry exact quotes from saved sources; new ideas carry the tests they
+passed or failed, or say they are untested.
 
-Beyond answering, it explores. Ideators working from different fields propose ideas,
-judges compare them in a tournament, and the strongest ideas from different clusters
-are tested, then evolved into the next generation. Every idea must quote the closest
-existing work and say what it adds, because models are poor judges of their own novelty.
+It also explores: ideators from different fields propose ideas, judges rank them in a
+tournament, the best of each cluster are tested, and the winners evolve into the next
+generation. Each idea must quote its closest prior work, because models overrate their
+own novelty.
 
-It works with any agent that has a shell and reads `AGENTS.md` or loads skills. It needs
-Python 3.10+ and nothing else.
+Works with any agent that has a shell and reads `AGENTS.md` or loads skills. Needs only
+Python 3.10+.
 
 ## Use it
 
-1. Copy this repository into a new folder for one research problem (on GitHub: *Use this
-   template*).
+1. Copy this repository into a new folder (on GitHub: *Use this template*).
 2. Write the question under `## Question` in `AGENTS.md`.
-3. Open the folder with your agent and ask it to research the question.
+3. Ask your agent to research it. The result is `report.md`.
 
-Optional: set `OPENALEX_API_KEY` (free from OpenAlex) to search journals in every field,
-refuse retracted papers, and find open copies of paywalled ones. Without it, literature
-search uses arXiv only.
+Optional: set `OPENALEX_API_KEY` (free) to search journals in every field, refuse
+retracted papers and find open copies of paywalled ones. Without it, search uses arXiv.
 
-`AGENTS.md` also points the agent to `.skills/gauntlet/SKILL.md`, which holds the research
-loop. `.skills/gauntlet/` is a standard Agent Skills folder, for agents that load skills.
-
-See [docs/example.md](docs/example.md) for a short worked example.
-
-## What the folder holds
+## The folder
 
 ```
-AGENTS.md         the question (you write it) and how any agent should work here
+AGENTS.md          your question, and how agents work here
 .skills/gauntlet/
-  SKILL.md        the research loop, rules and field guide
-  roles/          reader, synthesizer, ideator, judge, prover, breaker, referee, writer
-  scripts/
-    search.py     searches arXiv and OpenAlex beyond the sources already read
-    source.py     reads sources and keeps exact copies (arXiv papers pinned to one version)
-    claim.py      records claims and ideas; checks quotes and numbers; filters duplicate ideas
-    rank.py       pairs ideas for judging, keeps Elo scores, picks the best of each cluster,
-                  summarises verdicts for the meta-review
-    run_test.py   runs tests on the agent's seeds and on held-out seeds, with resource limits
-    label.py      gives labels the evidence earns
-    report.py     re-checks everything and writes the report
-    lib/          specialised helpers: arXiv reader, literature search, source identity,
-                  web fetching, word-overlap similarity
-    tests/        tests for the scripts
-sources/          exact copies of every source read
-runs/             test scripts and the log of every run
-claims.jsonl      every claim and idea, with quotes, tests and label   (created by the run)
-tournament.jsonl  every judged comparison of two ideas                (created by the run)
-meta_review.md    what the judges rewarded, for the next generation   (created by the run)
-evidence_map.md   what sources agree and disagree on, what is open      (created by the run)
-report.md         the final report                                      (created by the run)
+  SKILL.md         the research loop, rules and field guide
+  roles/           reader, synthesizer, ideator, judge, prover, breaker, referee, writer
+  scripts/         the checks (below); lib/ holds their helpers
+sources/           exact copies of every source read
+runs/              test scripts and the log of every run
 ```
+
+A run adds `claims.jsonl`, `tournament.jsonl`, `evidence_map.md`, `meta_review.md`,
+`answer.md` and `report.md`.
 
 ## How it works
 
-The agent does the reading, thinking and writing. Small scripts do the checks a model cannot
-reliably do for itself:
+The agent reads, thinks and writes. The scripts check what a model can't be trusted to
+check itself:
 
-| The agent… | Gauntlet… |
+| Script | What it guarantees |
 |---|---|
-| searches the literature (`search.py`) | queries arXiv (and OpenAlex) and marks results already read |
-| reads a source (`source.py`) | fetches the page itself and keeps an exact copy; pins arXiv papers to one version; records each source's identity, so a preprint and its journal version count as one work |
-| records a claim with a quote (`claim.py`) | confirms the quote is word for word in that copy and every number traces to it |
-| proposes an idea (`claim.py`) | requires the closest prior work quoted word for word, refuses near-duplicates of earlier ideas, and suggests the closest passages to quote |
-| judges two ideas (`rank.py`) | records the verdict, recomputes Elo scores from every verdict, and groups similar ideas so the top stays diverse |
-| tests an idea (`run_test.py`) | runs the code itself, on the agent's seeds and on held-out seeds it picks at random; rejects tests whose output ignores the seed |
-| labels a claim (`label.py`) | refuses any label the evidence has not earned, and records why each label was given |
-| writes the answer (`report.py`) | re-checks every label, refuses an answer that overstates, and builds the report |
+| `source.py` | Gauntlet fetches each source itself and keeps an exact copy (arXiv pinned to one version) |
+| `search.py` | Searches arXiv and OpenAlex beyond the sources already read |
+| `claim.py` | Quotes are word for word in the saved copy; every number traces to a quote; ideas quote their closest prior work; duplicate ideas are refused |
+| `rank.py` | Judges' verdicts are kept and replayed into Elo scores; similar ideas are clustered so the top stays diverse |
+| `run_test.py` | Tests run on the author's seeds and on held-out seeds Gauntlet picks; tests that ignore the seed don't count |
+| `label.py` | A label is refused unless the evidence earns it, and the reason is recorded |
+| `report.py` | Every label is re-checked first; an answer that overstates is refused |
 
 | Label | Requires |
 |---|---|
-| Established | Two or more independent works (not two versions of one paper), quoted word for word |
-| Reported | One source, quoted word for word |
+| Established | Two or more independent works (not two versions of one paper) |
+| Reported | One source |
 | Contested | Quotes on both sides |
-| New idea: tested | Passed on held-out seeds, and independently written code reproduces the result within 10% |
+| New idea: tested | Passed on held-out seeds; independent code reproduces it within 10% |
 | New idea: refuted | A run failed |
-| New idea: untested | Closest prior work quoted word for word, the difference stated, and the test that would settle it |
+| New idea: untested | Closest prior work quoted, difference stated, settling test given |
 
-## Working on Gauntlet itself
+The scripts are safe for parallel subagents (they lock the records), cap a folder at 60
+ideas and 60 tests (`GAUNTLET_MAX_IDEAS`, `GAUNTLET_MAX_TESTS`), and print one JSON object:
+exit 0 means done, 1 refused, 2 misuse.
 
-- Keep it provider-agnostic: no agent-specific files, tool names or wording.
-- Scripts: Python 3.10+, standard library only, one JSON object on stdout; exit 0 = done,
-  1 = refused, 2 = misuse.
-- Before adding code, ask whether an instruction in `SKILL.md` could do the job instead.
-  Code is only for checks that must not depend on the model's honesty or memory.
-- Run the tests with `pip install pytest && pytest`.
+## Example
+
+An inflated number is caught; the honest claim earns its label:
+
+```
+$ echo '{"statement": "Shots fell 11-fold.", "quotes": [{"url": "https://example.org/paper",
+        "quote": "the number of shots needed to reach precision 0.01 fell by a factor of 8.0"}]}' | python3 .skills/gauntlet/scripts/claim.py
+{"id": "C1", "label": "pending", "fix": ["the number 11 is not in any quote or test log"]}
+
+$ python3 .skills/gauntlet/scripts/label.py C2 reported --reason "one source states it"
+{"id": "C2", "label": "Reported"}
+```
+
+## Changing Gauntlet
+
+Keep it provider-agnostic and standard-library only. Add code only for checks that must
+not depend on the model's honesty or memory; everything else belongs in `SKILL.md` or a role.

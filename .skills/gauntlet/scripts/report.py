@@ -10,7 +10,6 @@ draft. --high-stakes adds a not-advice notice.
 """
 from __future__ import annotations
 
-import argparse
 import re
 
 from claim import claims

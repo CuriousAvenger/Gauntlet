@@ -17,7 +17,6 @@ every recorded verdict in tournament.jsonl, so a verdict can never be quietly ed
 """
 from __future__ import annotations
 
-import argparse
 import json
 import random
 from typing import Any
