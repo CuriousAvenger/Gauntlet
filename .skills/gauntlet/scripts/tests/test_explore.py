@@ -64,3 +64,10 @@ def test_review_groups_verdicts_by_deciding_criterion(run, sources):
     assert review["deciding_criteria"]["testability"] == 1
     assert review["by_criterion"]["testability"][0]["reason"] == "runs today"
     assert review["records"][a]["won"] == 1 and review["records"][c]["lost"] == 1
+
+
+def test_pair_order_is_randomised_against_position_bias(run, sources):
+    propose(run, "Importance sampling cuts readout shots on lattice fluid solvers.")
+    propose(run, "Classical shadows with derandomisation beat uniform Pauli sampling for chemistry.")
+    firsts = {run("rank.py", "pairs")[1]["pairs"][0][0]["id"] for _ in range(12)}
+    assert firsts == {"I1", "I2"}

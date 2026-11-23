@@ -33,7 +33,7 @@ import unicodedata
 from typing import Any
 
 from lib.similarity import closest, passages, similarity
-from source import ROOT, fail, finish, sha256, source_text, sources, write_file
+from source import ROOT, fail, finish, locked, sha256, source_text, sources, write_file
 
 CLAIMS = ROOT / "claims.jsonl"
 DUPLICATE = 0.9      # at or above: the same idea reworded, refused
@@ -111,16 +111,24 @@ def quote_problems(claim: dict[str, Any]) -> list[str]:
     return problems
 
 
+_REFERENCE = re.compile(r"\b(?:fig(?:ure)?s?|tables?|eqs?|equations?|sections?|chapters?|appendix|refs?)\.?\s*"
+                        r"\d+[a-z]?|\[\d+(?:\s*[,\u2013-]\s*\d+)*\]", re.I)
+
+
 def number_problems(claim: dict[str, Any]) -> list[str]:
     """Each number in the statement must appear in a quote or a test log, allowing rounding to
-    the precision the statement shows (a log value 8.14 supports "8", not "8.0")."""
+    the precision the statement shows (a log value 8.14 supports "8", not "8.0"). Years and
+    references to figures, tables, equations or citations are not measurements, so they are
+    exempt."""
     evidence = " ".join(q["quote"] for q in claim["quotes"] + claim.get("prior_work", []))
     for run in (r for t in claim["tests"] for r in t["runs"]):
         log = ROOT / run["log"]
         evidence += "\n" + (log.read_text(errors="replace") if log.exists() else "")
     known = [v for v, _ in numbers(evidence)]
+    statement = _REFERENCE.sub(" ", claim["statement"])
     return [f"the number {v:g} is not in any quote or test log"
-            for v, places in numbers(claim["statement"]) if not any(round(k, places) == round(v, places) for k in known)]
+            for v, places in numbers(statement)
+            if not (places == 0 and 1900 <= v <= 2100) and not any(round(k, places) == round(v, places) for k in known)]
 
 
 def grounding_problems(idea: dict[str, Any]) -> list[str]:
@@ -183,51 +191,52 @@ def main() -> None:
     except json.JSONDecodeError as e:
         fail(f"stdin is not valid JSON: {e}")
 
-    index = sources()
-    quotes = _entries(req.get("quotes", []), index)
-    prior = _entries(req.get("prior_work", []), index)
+    with locked():
+        index = sources()
+        quotes = _entries(req.get("quotes", []), index)
+        prior = _entries(req.get("prior_work", []), index)
 
-    def new_id(prefix):
-        return f"{prefix}{1 + sum(c['id'].startswith(prefix) for c in claims())}"
+        def new_id(prefix):
+            return f"{prefix}{1 + sum(c['id'].startswith(prefix) for c in claims())}"
 
-    if req.get("add_to"):
-        claim = get_claim(req["add_to"])
-        claim["quotes"] += quotes
+        if req.get("add_to"):
+            claim = get_claim(req["add_to"])
+            claim["quotes"] += quotes
+            if "settling_test" in claim:
+                claim["prior_work"] = claim.get("prior_work", []) + prior
+                claim["difference"] = req.get("difference", claim.get("difference", "")).strip()
+        elif req.get("settling_test"):
+            statement = req.get("statement", "").strip()
+            distinct = req.get("distinct_from") or {}
+            _check_duplicates(statement, distinct)
+            known = {c["id"] for c in claims()}
+            missing = [p for p in req.get("parents", []) if p not in known]
+            if missing:
+                fail(f"unknown parents: {missing}")
+            claim = {"id": new_id("I"), "statement": statement, "quotes": quotes, "prior_work": prior,
+                     "difference": req.get("difference", "").strip(), "settling_test": req["settling_test"].strip(),
+                     "lens": req.get("lens", ""), "parents": req.get("parents", []),
+                     "generation": int(req.get("generation", 1)), "distinct_from": distinct,
+                     "tests": [], "label": "pending"}
+        elif quotes:
+            claim = {"id": new_id("C"), "statement": req.get("statement", "").strip(), "quotes": quotes,
+                     "tests": [], "label": "pending"}
+        else:
+            fail("give quotes (a claim from sources), settling_test (an idea), or add_to with more evidence")
+        if not claim["statement"]:
+            fail("the statement is empty")
+        out: dict[str, Any] = {"id": claim["id"]}
         if "settling_test" in claim:
-            claim["prior_work"] = claim.get("prior_work", []) + prior
-            claim["difference"] = req.get("difference", claim.get("difference", "")).strip()
-    elif req.get("settling_test"):
-        statement = req.get("statement", "").strip()
-        distinct = req.get("distinct_from") or {}
-        _check_duplicates(statement, distinct)
-        known = {c["id"] for c in claims()}
-        missing = [p for p in req.get("parents", []) if p not in known]
-        if missing:
-            fail(f"unknown parents: {missing}")
-        claim = {"id": new_id("I"), "statement": statement, "quotes": quotes, "prior_work": prior,
-                 "difference": req.get("difference", "").strip(), "settling_test": req["settling_test"].strip(),
-                 "lens": req.get("lens", ""), "parents": req.get("parents", []),
-                 "generation": int(req.get("generation", 1)), "distinct_from": distinct,
-                 "tests": [], "label": "pending"}
-    elif quotes:
-        claim = {"id": new_id("C"), "statement": req.get("statement", "").strip(), "quotes": quotes,
-                 "tests": [], "label": "pending"}
-    else:
-        fail("give quotes (a claim from sources), settling_test (an idea), or add_to with more evidence")
-    if not claim["statement"]:
-        fail("the statement is empty")
-    out: dict[str, Any] = {"id": claim["id"]}
-    if "settling_test" in claim:
-        problems = grounding_problems(claim)
-        if claim["label"] == "pending" and not problems:
-            claim["label"] = "untested"
-        out["closest_in_sources"] = closest_in_sources(claim["statement"] + " " + claim.get("difference", ""))
-    else:
-        problems = quote_problems(claim) + number_problems(claim)
-    put_claim(claim)
-    out["label"] = claim["label"]
-    if problems:
-        out["fix"] = problems
+            problems = grounding_problems(claim)
+            if claim["label"] == "pending" and not problems:
+                claim["label"] = "untested"
+            out["closest_in_sources"] = closest_in_sources(claim["statement"] + " " + claim.get("difference", ""))
+        else:
+            problems = quote_problems(claim) + number_problems(claim)
+        put_claim(claim)
+        out["label"] = claim["label"]
+        if problems:
+            out["fix"] = problems
     finish(out)
 
 

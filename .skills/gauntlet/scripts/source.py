@@ -17,6 +17,7 @@ This file also owns the research folder's location and the JSON output the other
 from __future__ import annotations
 
 import argparse
+import contextlib
 import hashlib
 import json
 import os
@@ -24,7 +25,7 @@ import re
 import sys
 import tempfile
 from pathlib import Path
-from typing import Any, NoReturn
+from typing import Any, Iterator, NoReturn
 
 from lib import arxiv, identity, web
 
@@ -44,6 +45,17 @@ def fail(message: str, code: int = 2) -> NoReturn:
     finish({"error": message}, code)
 
 
+class Parser(argparse.ArgumentParser):
+    """Command-line parser whose usage errors follow the JSON contract (exit 2 = misuse)."""
+
+    def __init__(self, doc: str | None = None, **kwargs: Any):
+        kwargs.setdefault("formatter_class", argparse.RawDescriptionHelpFormatter)
+        super().__init__(description=doc, **kwargs)  # subcommand parsers arrive with their own kwargs
+
+    def error(self, message: str) -> NoReturn:
+        fail(f"{message} (see --help)")
+
+
 def write_file(path: Path, text: str) -> None:
     """Atomic write, so a crash never leaves a half-written record."""
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -55,6 +67,33 @@ def write_file(path: Path, text: str) -> None:
 
 def sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+_lock: dict[str, Any] = {"depth": 0, "file": None}
+
+
+@contextlib.contextmanager
+def locked() -> Iterator[None]:
+    """Hold the research folder's lock while reading and rewriting records, so agents working
+    in parallel never lose each other's writes or reuse an id. Re-entrant within a process."""
+    if _lock["depth"] == 0:
+        ROOT.mkdir(parents=True, exist_ok=True)
+        f = open(ROOT / ".gauntlet.lock", "a+")
+        try:
+            import fcntl
+            fcntl.flock(f, fcntl.LOCK_EX)
+        except ImportError:  # Windows
+            import msvcrt
+            msvcrt.locking(f.fileno(), msvcrt.LK_LOCK, 1)
+        _lock["file"] = f
+    _lock["depth"] += 1
+    try:
+        yield
+    finally:
+        _lock["depth"] -= 1
+        if _lock["depth"] == 0:
+            _lock["file"].close()  # closing the file releases the lock
+            _lock["file"] = None
 
 
 def sources() -> dict[str, dict[str, Any]]:
@@ -78,35 +117,43 @@ def _read(url: str) -> tuple[str, str, dict[str, Any]]:
 
 
 def save(url: str, page_text: str | None, title: str | None = None) -> dict[str, Any]:
-    """Saved copy of `url`, fetching it on first use; failures are recorded as unreadable."""
-    index = sources()
-    src = index.get(url)
+    """Saved copy of `url`, fetching it on first use; failures are recorded as unreadable.
+    The fetch happens outside the lock; only the bookkeeping holds it."""
+    src = sources().get(url)
     if src and src["status"] == "read":
         return src
     if src and page_text is None:
         fail(f"unreadable, so it cannot be cited: {src['reason']}. If you can read it, use --text-file.", 1)
-    sid = src["id"] if src else f"S{len(index) + 1}"
     try:
         text, fetched_title, extra = (page_text, "", {}) if page_text is not None else _read(url)
     except web.FetchError as e:
-        index[url] = {"id": sid, "url": url, "status": "unreadable", "reason": str(e)}
+        text, error = None, str(e)
+    with locked():
+        index = sources()
+        src = index.get(url)
+        if src and src["status"] == "read":
+            return src  # another agent saved it meanwhile
+        sid = src["id"] if src else f"S{len(index) + 1}"
+        if text is None:
+            index[url] = {"id": sid, "url": url, "status": "unreadable", "reason": error}
+            write_file(INDEX, json.dumps(index, indent=1))
+            fail(f"unreadable, so it cannot be cited: {error}. If you can read the page, use --text-file.", 1)
+        path = ROOT / "sources" / f"{sid}.txt"
+        write_file(path, text)
+        meta = extra.pop("meta", {})
+        row = {"id": sid, "url": url, "title": title or fetched_title or url, "status": "read",
+               "file": f"sources/{sid}.txt", "sha256": sha256(path), "ids": identity.keys(url, meta),
+               "supplied_by_agent": page_text is not None, **extra}
+        same = [s["id"] for s in index.values() if s["status"] == "read" and identity.same_work(row, s)]
+        if same:
+            row["same_work_as"] = same
+        index[url] = row
         write_file(INDEX, json.dumps(index, indent=1))
-        fail(f"unreadable, so it cannot be cited: {e}. If you can read the page, use --text-file.", 1)
-    path = ROOT / "sources" / f"{sid}.txt"
-    write_file(path, text)
-    meta = extra.pop("meta", {})
-    row = {"id": sid, "url": url, "title": title or fetched_title or url, "status": "read", "file": f"sources/{sid}.txt",
-           "sha256": sha256(path), "ids": identity.keys(url, meta), "supplied_by_agent": page_text is not None, **extra}
-    same = [s["id"] for s in index.values() if s["status"] == "read" and identity.same_work(row, s)]
-    if same:
-        row["same_work_as"] = same
-    index[url] = row
-    write_file(INDEX, json.dumps(index, indent=1))
     return row
 
 
 if __name__ == "__main__":
-    p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    p = Parser(__doc__)
     p.add_argument("url")
     p.add_argument("--from", dest="start", type=int, default=0)
     p.add_argument("--find")

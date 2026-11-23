@@ -26,7 +26,7 @@ from pathlib import Path
 from typing import Any
 
 from claim import get_claim, put_claim
-from source import ROOT, fail, finish, sha256, write_file
+from source import ROOT, Parser, fail, finish, locked, sha256, write_file
 
 HELD_OUT_SEEDS = 3
 TIMEOUT_S = 120
@@ -86,7 +86,7 @@ def execute(test: dict[str, Any]) -> dict[str, Any]:
 
 
 def main() -> None:
-    p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    p = Parser(__doc__)
     p.add_argument("idea")
     p.add_argument("role", choices=("support", "replication", "counterexample"))
     p.add_argument("script")
@@ -103,13 +103,19 @@ def main() -> None:
         fail(f"--replicates must name a support test of {a.idea}: "
              f"{[t['id'] for t in idea['tests'] if t['role'] == 'support']}")
 
-    test_id = f"{a.idea}-T{len(idea['tests']) + 1}"
-    (ROOT / "runs").mkdir(exist_ok=True)
-    shutil.copyfile(a.script, ROOT / "runs" / f"{test_id}.py")
+    with locked():  # reserve a test id: the frozen script's file name claims it
+        (ROOT / "runs").mkdir(exist_ok=True)
+        n = len(idea["tests"]) + 1
+        while (ROOT / "runs" / f"{a.idea}-T{n}.py").exists():
+            n += 1
+        test_id = f"{a.idea}-T{n}"
+        shutil.copyfile(a.script, ROOT / "runs" / f"{test_id}.py")
     test = execute({"id": test_id, "role": a.role, "script": f"runs/{test_id}.py",
                     "seeds": [int(s) for s in a.seeds.split(",")], "replicates": a.replicates})
-    idea["tests"].append(test)
-    put_claim(idea)
+    with locked():  # re-read the idea: other tests may have been added while this one ran
+        idea = get_claim(a.idea)
+        idea["tests"].append(test)
+        put_claim(idea)
     out = {"test": test_id, "runs": [{k: r[k] for k in ("seed", "held_out", "pass", "headline")} for r in test["runs"]]}
     broken = next((r for r in test["runs"] if r["pass"] is None), None)
     if broken:

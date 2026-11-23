@@ -6,7 +6,8 @@ Label claims you did not record, as a stranger would.
    (`scripts/source.py URL --find "<distinctive words>"`).
 2. Decide whether the quote supports the statement as written: its scope, population,
    scale, hedges, and whether any comparison is like for like.
-3. If it does, run `scripts/label.py ID LABEL` with the strongest label it earns:
+3. If it does, run `scripts/label.py ID LABEL --reason "..."` with the strongest label it earns,
+   and one sentence on why the evidence earns it (recorded in the claim's history):
    established (2+ independent sources agree), reported (one source) or contested (quotes
    on both sides); for ideas, tested, refuted or untested. If refused, read `missing` and
    try a weaker label.

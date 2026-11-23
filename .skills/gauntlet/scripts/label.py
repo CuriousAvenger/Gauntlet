@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Give a claim a label; refused, with what is missing, unless the evidence earns it.
 
-  label.py CLAIM_ID LABEL
+  label.py CLAIM_ID LABEL --reason "why the evidence earns it"
 
 Claims from sources: established (2+ independent sources agree), reported (one source),
 contested (quotes on both sides). Ideas: untested (grounded: closest prior work quoted and
@@ -12,14 +12,15 @@ This file also owns the label rules and the re-audit that report.py runs.
 """
 from __future__ import annotations
 
-import sys
+import argparse
+import datetime
 from statistics import mean
 from typing import Any
 
 from claim import claims, get_claim, grounding_problems, number_problems, put_claim, quote_problems, save_claims
 from lib.identity import count_works
 from run_test import execute, is_stale
-from source import ROOT, fail, finish, sources
+from source import ROOT, Parser, finish, locked, sources
 
 LABELS = ("established", "reported", "contested", "tested", "refuted", "untested")
 NAMES = {"established": "Established", "reported": "Reported", "contested": "Contested",
@@ -48,6 +49,10 @@ def test_problems(idea: dict[str, Any]) -> list[str]:
         elif t["role"] == "counterexample" and any(r["pass"] is False for r in t["runs"]):
             problems.append(f"{t['id']}: a counterexample broke the idea")
     for t in support:
+        logs = {(ROOT / r["log"]).read_text(errors="replace") for r in t["runs"] if (ROOT / r["log"]).exists()}
+        if len(t["runs"]) > 1 and len(logs) == 1:
+            problems.append(f"{t['id']}: its output is identical for every seed, so the held-out seeds tested "
+                            "nothing; generate the instances from --seed")
         failed = [r["seed"] for r in t["runs"] if not r["pass"]]
         if failed:
             own_ok = all(r["pass"] for r in t["runs"] if not r["held_out"])
@@ -98,6 +103,11 @@ def unmet(claim: dict[str, Any]) -> dict[str, list[str]]:
 def reaudit() -> list[dict[str, str]]:
     """Re-run tests whose scripts were edited, then move any label no longer earned to the
     strongest one that is (a tested idea whose test now fails becomes refuted)."""
+    with locked():
+        return _reaudit()
+
+
+def _reaudit() -> list[dict[str, str]]:
     rows, changes = claims(), []
     for c in rows:
         for t in c["tests"]:
@@ -110,24 +120,32 @@ def reaudit() -> list[dict[str, str]]:
             order = ("refuted", "tested", "untested") if "settling_test" in c else ("established", "contested", "reported")
             new = next((label for label in order if not missing[label]), "pending")
             changes.append({"id": c["id"], "from": c["label"], "to": new})
+            c.setdefault("history", []).append({"label": new, "reason": "re-check: " + "; ".join(missing[c["label"]][:2]),
+                                                "at": _now()})
             c["label"] = new
     save_claims(rows)
     return changes
 
 
+def _now() -> str:
+    return datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds")
+
+
 def main() -> None:
-    if sys.argv[1:2] in (["-h"], ["--help"]):
-        print(__doc__)
-        sys.exit(0)
-    if len(sys.argv) != 3 or sys.argv[2] not in LABELS:
-        fail(f"usage: label.py CLAIM_ID LABEL, where LABEL is one of {', '.join(LABELS)}")
-    claim, label = get_claim(sys.argv[1]), sys.argv[2]
-    missing = unmet(claim)[label]
-    if missing:
-        finish({"id": claim["id"], "refused": label, "label": NAMES[claim["label"]], "missing": missing}, 1)
-    claim["label"] = label
-    put_claim(claim)
-    finish({"id": claim["id"], "label": NAMES[label]})
+    p = Parser(__doc__)
+    p.add_argument("claim")
+    p.add_argument("label", choices=LABELS)
+    p.add_argument("--reason", required=True, help="one sentence: why the evidence earns this label")
+    a = p.parse_args()
+    with locked():
+        claim = get_claim(a.claim)
+        missing = unmet(claim)[a.label]
+        if missing:
+            finish({"id": claim["id"], "refused": a.label, "label": NAMES[claim["label"]], "missing": missing}, 1)
+        claim.setdefault("history", []).append({"label": a.label, "reason": a.reason.strip(), "at": _now()})
+        claim["label"] = a.label
+        put_claim(claim)
+    finish({"id": claim["id"], "label": NAMES[a.label]})
 
 
 if __name__ == "__main__":

@@ -12,9 +12,9 @@ import argparse
 
 from lib.identity import keys, same_work
 from lib.search import search
-from source import ROOT, finish, sources
+from source import ROOT, Parser, finish, sources
 
-p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+p = Parser(__doc__)
 p.add_argument("query")
 p.add_argument("--n", type=int, default=10)
 p.add_argument("--where", choices=("arxiv", "openalex", "all"), default="all")

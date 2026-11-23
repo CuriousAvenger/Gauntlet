@@ -86,6 +86,6 @@ def test_two_versions_of_one_paper_are_one_source(run, tmp_path):
     cid = run("claim.py", stdin={"statement": "Shots fell 8.0-fold.", "quotes": [
         {"url": "https://arxiv.org/abs/2106.09685v1", "quote": QUOTE},
         {"url": "https://arxiv.org/abs/2106.09685v2", "quote": QUOTE}]})[1]["id"]
-    code, out = run("label.py", cid, "established")
+    code, out = run("label.py", cid, "established", "--reason", "test")
     assert code == 1 and "one work" in out["missing"][0]
-    assert run("label.py", cid, "reported")[0] == 0
+    assert run("label.py", cid, "reported", "--reason", "test")[0] == 0

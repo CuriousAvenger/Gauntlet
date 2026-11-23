@@ -18,7 +18,7 @@ def test_answer_rules(run, sources, tmp_path):
                         ("Shots fell 8-fold.", "without citing"), ("See [C9].", "does not exist")]:
         code, out = report(run, tmp_path, answer)
         assert code == 1 and why in " ".join(out["fix"])
-    run("label.py", cid, "reported")
+    run("label.py", cid, "reported", "--reason", "test")
     assert report(run, tmp_path, f"One study reports an 8-fold drop [{cid}].", "--high-stakes")[0] == 0
     text = (sources / "report.md").read_text()
     assert f"[{cid} · Reported]" in text and "## Frontier" in text and "Would be settled by" in text
@@ -27,7 +27,7 @@ def test_answer_rules(run, sources, tmp_path):
 
 def test_report_rechecks_edited_tests(run, sources, tmp_path):
     iid = idea(run, tmp_path, replica=GOOD)
-    assert run("label.py", iid, "tested")[0] == 0
+    assert run("label.py", iid, "tested", "--reason", "test")[0] == 0
     (tmp_path / f"runs/{iid}-T1.py").write_text(BROKEN)
     report(run, tmp_path, "Nothing is cited here.", "--draft")
     text = (tmp_path / "report.md").read_text()

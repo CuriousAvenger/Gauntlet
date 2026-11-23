@@ -25,10 +25,11 @@ that you can read directly: `claims.jsonl`, `sources/`, `runs/`, `tournament.jso
 | `claim.py` (JSON on stdin) | Record a claim with quotes, or an idea with its closest prior work and the test that would settle it |
 | `rank.py pairs` / `match` / `top` / `review` | Get pairs of ideas to compare, record verdicts, see the leaderboard and the diverse top, and review what the verdicts rewarded |
 | `run_test.py IDEA ROLE SCRIPT` | Have Gauntlet run a test script on your seeds and on held-out seeds |
-| `label.py ID LABEL` | Give a claim a label; refused, with reasons, unless earned |
+| `label.py ID LABEL --reason "..."` | Give a claim a label, recording why; refused, with what is missing, unless earned |
 | `report.py --answer FILE` | Re-check everything and write `report.md` |
 
-Each script's `--help` shows its exact usage. In the role files, `scripts/` means
+Each script's `--help` shows its exact usage. The scripts are safe to run from parallel
+subagents: they lock the records while writing. In the role files, `scripts/` means
 `.skills/gauntlet/scripts/`.
 
 ## The loop

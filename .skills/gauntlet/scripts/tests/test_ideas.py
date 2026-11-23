@@ -27,7 +27,7 @@ def idea(run, tmp_path, support=GOOD, replica=None, counter=None, seeds="0", sta
 
 
 def missing(run, iid, label="tested"):
-    code, out = run("label.py", iid, label)
+    code, out = run("label.py", iid, label, "--reason", "test")
     return " ".join(out.get("missing", [])) if code else ""
 
 
@@ -61,3 +61,9 @@ def test_runaway_memory_is_stopped(run, sources, tmp_path, monkeypatch):
     (tmp_path / "hog.py").write_text("x = bytearray(2 * 1024**3)\nprint('GAUNTLET_RESULT {\"pass\": true}')\n")
     code, out = run("run_test.py", iid, "counterexample", "hog.py")
     assert code == 0 and out["runs"][0]["pass"] is None and "MemoryError" in out["error_log"]
+
+
+def test_a_test_that_ignores_its_seed_is_not_evidence(run, sources, tmp_path):
+    constant = "print('GAUNTLET_RESULT {\"pass\": true, \"headline\": {\"ratio\": 8.0}}')\n"
+    iid = idea(run, tmp_path, constant, replica=GOOD, statement="A constant result proves the readout claim.")
+    assert "identical for every seed" in missing(run, iid)

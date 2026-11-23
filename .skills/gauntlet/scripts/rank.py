@@ -19,11 +19,12 @@ from __future__ import annotations
 
 import argparse
 import json
+import random
 from typing import Any
 
 from claim import claims
 from lib.similarity import similarity
-from source import ROOT, fail, finish
+from source import ROOT, Parser, fail, finish, locked
 
 TOURNAMENT = ROOT / "tournament.jsonl"
 START, K = 1200.0, 32.0
@@ -87,7 +88,7 @@ def next_pairs(n: int) -> list[tuple[str, str]]:
         partners = [b for b in pool if b != a and b not in used and frozenset((a, b)) not in met]
         if partners:
             b = min(partners, key=lambda b: abs(elo.get(a, START) - elo.get(b, START)))
-            pairs.append((a, b))
+            pairs.append((a, b) if random.random() < 0.5 else (b, a))  # judges favour whichever comes first
             used |= {a, b}
         if len(pairs) == n:
             break
@@ -126,7 +127,7 @@ def _brief(c: dict[str, Any]) -> dict[str, Any]:
 
 
 def main() -> None:
-    p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    p = Parser(__doc__)
     sub = p.add_subparsers(dest="command", required=True)
     sub.add_parser("pairs").add_argument("--n", type=int, default=5)
     m = sub.add_parser("match")
@@ -152,7 +153,7 @@ def main() -> None:
             fail("compare two different ideas; WINNER is one of them or 'draw'")
         if not a.reason.strip():
             fail("give the reason for the verdict")
-        with open(TOURNAMENT, "a", encoding="utf-8") as f:
+        with locked(), open(TOURNAMENT, "a", encoding="utf-8") as f:
             f.write(json.dumps({"a": a.a, "b": a.b, "winner": a.winner, "criterion": a.criterion,
                                 "reason": a.reason.strip()}) + "\n")
         elo, _ = ratings()

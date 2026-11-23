@@ -16,7 +16,7 @@ import re
 from claim import claims
 from label import NAMES, reaudit
 from rank import diverse_top, ratings
-from source import ROOT, fail, finish, sources, write_file
+from source import ROOT, Parser, fail, finish, sources, write_file
 
 FRONTIER = 5
 CITE = re.compile(r"\[((?:[CI]\d+)(?:\s*,\s*[CI]\d+)*)\]")
@@ -121,7 +121,7 @@ def render(title, answer, rows, changes, high_stakes, problems):
 
 
 def main() -> None:
-    p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    p = Parser(__doc__)
     p.add_argument("--answer", required=True)
     p.add_argument("--question")
     p.add_argument("--high-stakes", action="store_true")

@@ -66,8 +66,8 @@ reliably do for itself:
 | records a claim with a quote (`claim.py`) | confirms the quote is word for word in that copy and every number traces to it |
 | proposes an idea (`claim.py`) | requires the closest prior work quoted word for word, refuses near-duplicates of earlier ideas, and suggests the closest passages to quote |
 | judges two ideas (`rank.py`) | records the verdict, recomputes Elo scores from every verdict, and groups similar ideas so the top stays diverse |
-| tests an idea (`run_test.py`) | runs the code itself, on the agent's seeds and on held-out seeds it picks at random |
-| labels a claim (`label.py`) | refuses any label the evidence has not earned |
+| tests an idea (`run_test.py`) | runs the code itself, on the agent's seeds and on held-out seeds it picks at random; rejects tests whose output ignores the seed |
+| labels a claim (`label.py`) | refuses any label the evidence has not earned, and records why each label was given |
 | writes the answer (`report.py`) | re-checks every label, refuses an answer that overstates, and builds the report |
 
 | Label | Requires |
